@@ -72,6 +72,45 @@ export class KontentServiceFixed {
   }
 
   /**
+   * Get language ID from language codename
+   * @param languageCodename - Language codename like 'en', 'de', 'es', 'zh', 'default'
+   * @returns Language ID (UUID) or default language ID
+   */
+  private async getLanguageId(languageCodename: string): Promise<string> {
+    await this.ensureInitialized();
+    
+    // If 'default', use the default language ID
+    if (languageCodename === 'default' || languageCodename === 'en') {
+      return '00000000-0000-0000-0000-000000000000';
+    }
+
+    try {
+      // Get all languages from the project
+      const languagesResponse = await this.managementClient
+        .listLanguages()
+        .toPromise();
+
+      // Find the language by codename
+      const language = languagesResponse.data.items.find(
+        (lang: any) => lang.codename === languageCodename
+      );
+
+      if (language) {
+        console.log(`✅ Found language "${languageCodename}" with ID: ${language.id}`);
+        return language.id;
+      }
+
+      // If language not found, fallback to default and warn
+      console.warn(`⚠️ Language "${languageCodename}" not found. Using default language.`);
+      return '00000000-0000-0000-0000-000000000000';
+    } catch (error) {
+      console.error(`❌ Failed to get language ID for "${languageCodename}":`, error);
+      // Fallback to default language
+      return '00000000-0000-0000-0000-000000000000';
+    }
+  }
+
+  /**
    * Get all content types
    */
   async getContentTypes(): Promise<any[]> {
@@ -103,21 +142,50 @@ export class KontentServiceFixed {
     await this.ensureInitialized();
     
     try {
+      console.log(`🌐 Fetching items for type: "${contentTypeCodename}" in language: "${language}"`);
+      
       const items = await this.deliveryClient!
         .items()
         .type(contentTypeCodename)
         .languageParameter(language)
         .toPromise();
       
-      return items.data.items.map((item: any) => ({
+      console.log(`📊 API returned ${items.data.items.length} total items`);
+      
+      // Log first item details for debugging
+      if (items.data.items.length > 0) {
+        const firstItem = items.data.items[0];
+        console.log(`📄 First item from API:`, {
+          name: firstItem.system.name,
+          codename: firstItem.system.codename,
+          language: firstItem.system.language,
+          type: firstItem.system.type
+        });
+      }
+      
+      // CLIENT-SIDE FILTER: Filter items by language as fallback
+      // This ensures we only get items in the requested language
+      let filteredItems = items.data.items;
+      if (language !== 'default') {
+        const beforeFilter = filteredItems.length;
+        filteredItems = items.data.items.filter((item: any) => {
+          return item.system.language === language;
+        });
+        console.log(`🔍 Client-side filter: ${beforeFilter} items → ${filteredItems.length} items in "${language}"`);
+      }
+      
+      console.log(`✅ Final result: ${filteredItems.length} items for language "${language}"`);
+      
+      return filteredItems.map((item: any) => ({
         id: item.system.id,
         codename: item.system.codename,
         name: item.system.name,
         type: item.system.type,
+        language: item.system.language, // Include language in response
         lastModified: item.system.lastModified ? new Date(item.system.lastModified) : new Date(),
       }));
     } catch (error) {
-      console.error('Failed to fetch content items:', error);
+      console.error(`❌ Failed to fetch content items for language "${language}":`, error);
       throw error;
     }
   }
@@ -171,10 +239,10 @@ export class KontentServiceFixed {
 
       log('info', `  → Found ${targetTypeData.data.elements.length} target elements`);
 
-      // Step 2.1: Use default language ID (most projects use this)
-      // For now, use the standard default language ID to avoid API complexity
-      const languageId = '00000000-0000-0000-0000-000000000000';
-      log('info', `  → Using language: ${sourceLanguage}`);
+      // Step 2.1: Get language ID based on source language
+      log('info', `  → Step 2.1: Getting language ID for "${sourceLanguage}"...`);
+      const languageId = await this.getLanguageId(sourceLanguage);
+      log('info', `  → Using language: ${sourceLanguage} (ID: ${languageId})`);
 
       // Step 3: Create new content item in target content type
       log('info', '  → Step 3: Creating new content item...');
@@ -324,7 +392,8 @@ export class KontentServiceFixed {
           const migratedCodename = await this.handleLinkedItemMigration(
             codename,
             sourceContentType,
-            targetContentType
+            targetContentType,
+            sourceLanguage
           );
           
           linkedReferences.push({ codename: migratedCodename });
@@ -509,7 +578,8 @@ export class KontentServiceFixed {
   async handleLinkedItemMigration(
     referencedCodename: string,
     sourceContentType: any,
-    targetContentType: any
+    targetContentType: any,
+    sourceLanguage: string = 'en'
   ): Promise<string> {
     await this.ensureInitialized();
     try {
@@ -569,7 +639,8 @@ export class KontentServiceFixed {
           console.log(`✅ Created migrated item: ${newMigratedItem.data.id}`);
           
           // Step 6: Create language variant with migrated field data
-          const languageId = '00000000-0000-0000-0000-000000000000';
+          const languageId = await this.getLanguageId(sourceLanguage);
+          console.log(`🌐 Using language "${sourceLanguage}" (ID: ${languageId}) for linked item migration`);
           
           console.log(`🔧 Creating language variant for migrated item...`);
           
@@ -585,7 +656,8 @@ export class KontentServiceFixed {
               const migratedParentCodename = await this.handleLinkedItemMigration(
                 parentCodename,
                 sourceContentType,
-                targetContentType
+                targetContentType,
+                sourceLanguage
               );
               parentReferences.push({ codename: migratedParentCodename });
             }

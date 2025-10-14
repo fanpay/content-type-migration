@@ -435,21 +435,21 @@ export default function App() {
             <div className="bg-white rounded-lg shadow-md p-6">
               <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center space-x-4">
-                  <h2 className="text-xl font-semibold text-gray-900">Select Content Items to Migrate</h2>
-                  <div className="flex items-center space-x-2">
-                    <label htmlFor="language-select" className="text-sm font-medium text-gray-700">
-                      Language:
-                    </label>
+                  <h2 className="text-xl font-semibold text-gray-900">
+                    Select Content Items to Migrate
+                  </h2>
+                  <div className="flex items-center space-x-2 bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5">
+                    <span className="text-sm font-medium text-blue-900">🌐 Language:</span>
                     <select
                       id="language-select"
                       value={selectedLanguage}
                       onChange={(e) => setSelectedLanguage(e.target.value)}
-                      className="px-3 py-1 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="px-2 py-1 border border-blue-300 rounded-md text-sm font-medium bg-white text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     >
-                      <option value="en">English (en)</option>
-                      <option value="de">German (de)</option>
-                      <option value="es">Spanish (es)</option>
-                      <option value="zh">Chinese (zh)</option>
+                      <option value="en">🇬🇧 English</option>
+                      <option value="de">🇩🇪 Deutsch</option>
+                      <option value="es">🇪🇸 Español</option>
+                      <option value="zh">🇨🇳 中文</option>
                     </select>
                   </div>
                 </div>

@@ -37,6 +37,7 @@ export interface MigrationItem {
   id: string;
   name: string;
   codename: string;
+  language?: string;  // Language variant of the item
   lastModified: Date;
   selected: boolean;
 }

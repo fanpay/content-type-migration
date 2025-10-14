@@ -174,7 +174,7 @@ export function ContentItemList({
           filteredItems.map((item) => (
           <div
             key={item.id}
-            className="flex items-center space-x-3 p-4 hover:bg-gray-50"
+            className="flex items-center space-x-3 p-4 hover:bg-gray-50 border-b border-gray-100 last:border-b-0"
           >
             <input
               type="checkbox"
@@ -183,14 +183,21 @@ export function ContentItemList({
               className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
             />
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-medium text-gray-900 truncate">
-                {item.name}
+              <div className="flex items-center gap-2">
+                <div className="text-sm font-medium text-gray-900 truncate">
+                  {item.name}
+                </div>
+                {item.language && (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                    {item.language}
+                  </span>
+                )}
               </div>
               <div className="text-sm text-gray-500 truncate">
                 {item.codename}
               </div>
             </div>
-            <div className="text-sm text-gray-500">
+            <div className="text-sm text-gray-500 whitespace-nowrap">
               {item.lastModified ? item.lastModified.toLocaleDateString() : 'N/A'}
             </div>
           </div>
@@ -202,7 +209,7 @@ export function ContentItemList({
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
           <div className="flex justify-between items-center">
             <p className="text-sm text-blue-800">
-              <strong>{selectedCount}</strong> content item{selectedCount !== 1 ? 's' : ''} selected for migration.
+              <strong>{selectedCount}</strong> content item{selectedCount !== 1 ? 's' : ''} selected for migration (Language: <strong>{language}</strong>).
             </p>
             <button
               onClick={() => {
