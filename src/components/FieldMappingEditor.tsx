@@ -13,6 +13,9 @@ export function FieldMappingEditor({
   targetFields,
   onMappingChange,
 }: FieldMappingEditorProps) {
+  // Filter out guidelines fields - they are content type specific and shouldn't be mapped
+  const availableTargetFields = targetFields.filter(field => field.type !== 'guidelines');
+  
   const getCompatibilityIcon = (mapping: FieldMapping) => {
     if (!mapping.targetField) {
       return <span className="text-gray-400">○</span>;
@@ -63,7 +66,9 @@ export function FieldMappingEditor({
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {fieldMappings.map((mapping) => (
+              {fieldMappings
+                .filter(mapping => mapping.sourceField.type !== 'guidelines')
+                .map((mapping) => (
                 <tr key={mapping.sourceField.id} className={getCompatibilityColor(mapping)}>
                   <td className="px-4 py-3 whitespace-nowrap">
                     <div className="flex items-center">
@@ -94,7 +99,7 @@ export function FieldMappingEditor({
                       className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
                     >
                       <option value="">No mapping</option>
-                      {targetFields.map((field) => {
+                      {availableTargetFields.map((field) => {
                         const validation = MigrationServiceReal.validateFieldCompatibility(
                           mapping.sourceField,
                           field

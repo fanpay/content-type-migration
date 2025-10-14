@@ -765,7 +765,22 @@ export class KontentServiceFixed {
       console.log(`  Original value:`, fieldElement.value);
       console.log(`  Updated value:`, updatedValue);
 
-      // Step 8: Update the language variant - ONLY send the element we're updating
+      // Step 8: Check if the item is published, if so create a new version first
+      try {
+        // Try to create a new version (this will fail if already in draft)
+        await this.managementClient
+          .createNewVersionOfLanguageVariant()
+          .byItemCodename(itemCodename)
+          .byLanguageCodename(languageCodename)
+          .toPromise();
+        console.log(`📝 Created new draft version of ${itemCodename}`);
+      } catch (err) {
+        // Item is already in draft state, or error creating version
+        const errMsg = err instanceof Error ? err.message : 'Unknown';
+        console.log(`ℹ️  Item already in draft state or error creating version: ${errMsg}, continuing...`);
+      }
+
+      // Step 9: Update the language variant - ONLY send the element we're updating
       // The Management API allows partial updates, we don't need to send all elements
       await this.managementClient
         .upsertLanguageVariant()
@@ -783,7 +798,7 @@ export class KontentServiceFixed {
         }))
         .toPromise();
 
-      console.log(`✅ Successfully updated reference in ${itemCodename}`);
+      console.log(`✅ Successfully updated reference in ${itemCodename} (item is now in draft state)`);
       
       return { 
         success: true 

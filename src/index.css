@@ -33,7 +33,8 @@ h1 {
   line-height: 1.1;
 }
 
-button {
+/* Only apply button styles to buttons that don't have Tailwind classes */
+button:not([class*="bg-"]):not([class*="hover:bg-"]) {
   border-radius: 8px;
   border: 1px solid transparent;
   padding: 0.6em 1.2em;
@@ -45,7 +46,7 @@ button {
   cursor: pointer;
   transition: border-color 0.25s;
 }
-button:hover {
+button:not([class*="bg-"]):not([class*="hover:bg-"]):hover {
   border-color: #646cff;
 }
 button:focus,
