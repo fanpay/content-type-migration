@@ -1,103 +1,136 @@
 # Content Type Migration - Kontent.ai Custom App
 
-Una aplicación personalizada para Kontent.ai que permite migrar content items de un content type a otro dentro del mismo ambiente, con mapeo inteligente de campos y validación de compatibilidad.
+A custom application for Kontent.ai that allows migrating content items from one content type to another within the same environment, with intelligent field mapping and compatibility validation.
 
-## 🚀 Características
+## 🚀 Key Features
 
-- **Selección de Content Types**: Interfaz intuitiva para seleccionar content types de origen y destino
-- **Mapeo de Campos**: Visualización completa de todos los campos con su tipo y compatibilidad
-- **Validación de Compatibilidad**: Indicadores visuales de qué campos son compatibles entre sí
-- **Mapeo Automático**: Mapeo automático inicial basado en nombres de campos (codename y display name)
-- **Interfaz Responsive**: Diseño moderno con Tailwind CSS
-- **Proceso Step-by-Step**: Flujo de trabajo guiado en 3 pasos
+- **Content Type Selection**: Intuitive interface for selecting source and target content types
+- **Field Mapping**: Complete visualization of all fields with their type and compatibility
+- **Compatibility Validation**: Visual indicators of which fields are compatible with each other
+- **Automatic Mapping**: Initial automatic mapping based on field names (codename and display name)
+- **Recursive Migration**: Automatically migrates linked items of the same type
+- **Migration Reports**: Comprehensive reporting in console and UI
+- **Skip Duplicates**: Detects and skips already migrated items
+- **Responsive Interface**: Modern design with Tailwind CSS
+- **Step-by-Step Process**: Guided workflow in 3 steps
 
-## 🛠️ Tecnologías Utilizadas
+📚 **For detailed feature documentation, see [FEATURES.md](./FEATURES.md)**
 
-- **React 18** con TypeScript
-- **Vite** para desarrollo y build
-- **Tailwind CSS** para estilos
-- **Kontent.ai Management SDK** para gestión de content types
-- **Kontent.ai Delivery SDK** para lectura de content items
+## 🛠️ Technologies Used
 
-## 📋 Prerrequisitos
+- **React 18** with TypeScript
+- **Vite** for development and build
+- **Tailwind CSS** for styling
+- **Kontent.ai Management SDK** for content type management
+- **Kontent.ai Delivery SDK** for reading content items
+
+## 📋 Prerequisites
 
 - Node.js 18+ 
-- npm o yarn
-- Acceso a un proyecto de Kontent.ai
-- API Keys del proyecto (Management API Key y Preview API Key)
+- npm or yarn
+- Access to a Kontent.ai project
+- Project API Keys (Management API Key and Preview API Key)
 
-## 🚀 Instalación y Configuración
+## 🚀 Installation and Setup
 
-### 1. Clonar e instalar dependencias
+### 1. Clone and install dependencies
 
 ```bash
 cd custom-apps/content-type-migration
 npm install
 ```
 
-### 2. Configurar las credenciales de Kontent.ai
+### 2. Configure Kontent.ai credentials
 
-Crear un archivo `.env.local` basado en `.env.example`:
+Create a `.env.local` file based on `.env.example`:
 
 ```bash
-# Copiar el archivo de ejemplo
+# Copy the example file
 cp .env.example .env.local
 
-# Editar y agregar tus credenciales reales
-nano .env.local  # o usa tu editor preferido
+# Edit and add your real credentials
+nano .env.local  # or use your preferred editor
 ```
 
-**Contenido del `.env.local`**:
+**Contents of `.env.local`**:
 ```env
-VITE_KONTENT_PROJECT_ID=tu-project-id-aqui
-VITE_KONTENT_PREVIEW_API_KEY=tu-preview-api-key-aqui  
-VITE_KONTENT_MANAGEMENT_API_KEY=tu-management-api-key-aqui
+VITE_KONTENT_PROJECT_ID=your-project-id-here
+VITE_KONTENT_PREVIEW_API_KEY=your-preview-api-key-here  
+VITE_KONTENT_MANAGEMENT_API_KEY=your-management-api-key-here
 VITE_APP_URL=https://localhost:3001
 VITE_APP_CALLBACK_URL=https://localhost:3001/callback
 ```
 
-### 3. Ejecutar en modo desarrollo
+### 3. Run in development mode
 
 ```bash
 npm run dev
 ```
 
-La aplicación estará disponible en **`https://localhost:3001`** (nota el HTTPS)
+The application will be available at **`https://localhost:3001`** (note the HTTPS)
 
-## 📖 Uso
+## 📖 Usage
 
-### Paso 1: Selección de Content Types
+### Step 1: Content Type Selection
 
-1. Selecciona el **Content Type de Origen** del cual quieres migrar content items
-2. Selecciona el **Content Type de Destino** al cual quieres migrar los content items
-3. El sistema mostrará un resumen de los content types seleccionados
+1. Select the **Source Content Type** from which you want to migrate content items
+2. Select the **Target Content Type** to which you want to migrate the content items
+3. The system will show a summary of the selected content types
 
-### Paso 2: Mapeo de Campos
+### Step 2: Field Mapping
 
-1. **Visualización de Campos**: Se muestran todos los campos del content type de origen con:
-   - Nombre del campo
-   - Tipo de elemento (Text, Rich Text, Number, etc.)
-   - Si el campo es requerido
-   - Estado de compatibilidad
+1. **Field Visualization**: All fields from the source content type are displayed with:
+   - Field name
+   - Element type (Text, Rich Text, Number, etc.)
+   - Whether the field is required
+   - Compatibility status
 
-2. **Mapeo Manual**: Para cada campo de origen, puedes:
-   - Seleccionar un campo de destino del dropdown
-   - Ver indicadores de compatibilidad (✓ compatible, ✗ incompatible, ○ no mapeado)
-   - Leer notas sobre transformaciones necesarias
+2. **Manual Mapping**: For each source field, you can:
+   - Select a target field from the dropdown
+   - View compatibility indicators (✓ compatible, ✗ incompatible, ○ not mapped)
+   - Read notes about necessary transformations
 
-3. **Mapeo Automático**: El sistema intentará mapear automáticamente campos con:
-   - Mismo codename
-   - Mismo display name (insensible a mayúsculas)
+3. **Automatic Mapping**: The system will attempt to automatically map fields with:
+   - Same codename
+   - Same display name (case insensitive)
 
-### Paso 3: Ejecución de Migración
+### Step 3: Migration Execution
 
-1. **Selección de Items**: Elegir qué content items migrar
-2. **Revisión Final**: Confirmar la configuración de migración
-3. **Ejecución**: Monitorear el progreso de la migración
+1. **Item Selection**: Choose which content items to migrate
+2. **Final Review**: Confirm the migration configuration
+3. **Execution**: Monitor migration progress
 
-## 🔧 Tipos de Compatibilidad de Campos
+## 🎯 Advanced Features
 
-La aplicación valida automáticamente la compatibilidad entre tipos de elementos:
+### Recursive Linked Item Migration
+
+When migrating items with linked items (modular content) of the same source type, the system automatically:
+- Detects linked items that need migration
+- Recursively migrates all linked items in the hierarchy
+- Maintains proper references in the migrated structure
+
+### Comprehensive Reporting
+
+After each migration, you'll receive:
+- **Console Report**: Detailed summary with all created items
+- **UI Display**: Visual report with color-coded items
+  - 💙 Blue: Main items you selected
+  - 💚 Green: Auto-migrated linked items
+  - ⚠️ Yellow: Items that already existed (skipped)
+
+### Duplicate Prevention
+
+The system intelligently:
+- Detects already migrated items
+- Skips creation of duplicates
+- Uses existing item references
+- Clearly indicates skipped items in reports
+
+📚 **For complete feature documentation and examples, see [FEATURES.md](./FEATURES.md)**
+
+## 🔧 Field Type Compatibility
+
+The application automatically validates compatibility between element types:
 
 | Tipo Origen | Tipos Destino Compatibles |
 |-------------|---------------------------|

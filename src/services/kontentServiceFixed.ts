@@ -14,9 +14,22 @@ export interface FieldMapping {
   targetField: string;
 }
 
+export interface CreatedItemInfo {
+  originalCodename: string;
+  originalName: string;
+  originalType: string;
+  newCodename: string;
+  newName: string;
+  newType: string;
+  newId: string;
+  wasAutoMigrated: boolean; // true if created during recursive linked item migration
+  alreadyExisted: boolean;  // true if the item already existed and was skipped
+}
+
 export class KontentServiceFixed {
   private managementClient: any;
   private deliveryClient: DeliveryClient;
+  private createdItemsRegistry: CreatedItemInfo[] = []; // Registry of all items created during migration
 
   constructor() {
     const projectId = import.meta.env.VITE_KONTENT_PROJECT_ID;
@@ -61,8 +74,11 @@ export class KontentServiceFixed {
     sourceContentType: any,
     targetContentType: any,
     sourceLanguage: string = 'en'
-  ): Promise<{ success: boolean; newItem?: any; newVariant?: any; error?: string }> {
+  ): Promise<{ success: boolean; newItem?: any; newVariant?: any; createdItems?: CreatedItemInfo[]; error?: string }> {
     try {
+      // Reset the registry for this migration
+      this.createdItemsRegistry = [];
+      
       console.log(`🔄 Starting migration for item: ${sourceItem.name}`);
 
       // Step 1: Get source content with complete data using Delivery API
@@ -103,6 +119,19 @@ export class KontentServiceFixed {
         .toPromise();
 
       console.log('✅ New content item created:', newItem.data.id);
+
+      // Register the main migrated item
+      this.createdItemsRegistry.push({
+        originalCodename: sourceItem.codename,
+        originalName: sourceItem.name,
+        originalType: sourceContentType.codename,
+        newCodename: newItem.data.codename,
+        newName: newItem.data.name,
+        newType: targetContentType.codename,
+        newId: newItem.data.id,
+        wasAutoMigrated: false, // This is the main item, not auto-migrated
+        alreadyExisted: false,  // This is a new item
+      });
 
       // Step 4: Build elements for language variant based on field mappings
       const elements: any[] = [];
@@ -303,10 +332,14 @@ export class KontentServiceFixed {
 
       console.log('✅ Migration completed successfully with field data');
 
+      // Log the summary of created items
+      console.log(this.getCreatedItemsSummary());
+
       return {
         success: true,
         newItem: newItem.data,
         newVariant: newVariant.data,
+        createdItems: this.createdItemsRegistry, // Include all created items
       };
 
     } catch (error: any) {
@@ -447,12 +480,26 @@ export class KontentServiceFixed {
         try {
           // Step 4: Check if migrated version already exists
           console.log(`🔍 Checking if ${migratedCodename} already exists...`);
-          await this.deliveryClient.item(migratedCodename).toPromise();
+          const existingItem = await this.deliveryClient.item(migratedCodename).toPromise();
           console.log(`✅ Migrated version already exists: ${migratedCodename}`);
+          
+          // Register that this item already existed
+          this.createdItemsRegistry.push({
+            originalCodename: referencedCodename,
+            originalName: referencedItem.data.item.system.name,
+            originalType: sourceContentType.codename,
+            newCodename: migratedCodename,
+            newName: existingItem.data.item.system.name,
+            newType: targetContentType.codename,
+            newId: existingItem.data.item.system.id,
+            wasAutoMigrated: true,
+            alreadyExisted: true, // ← Item already existed, skipped creation
+          });
+          
           return migratedCodename;
-        } catch (notFoundError: any) {
+        } catch (notFoundError: unknown) {
           // Migrated version doesn't exist, create it
-          console.log(`🔨 Creating new migrated item: ${migratedCodename}`);
+          console.log(`🔨 Creating new migrated item: ${migratedCodename}`, notFoundError instanceof Error ? notFoundError.message : 'Item not found');
           
           // Step 5: Create the new migrated content item
           const newMigratedItem = await this.managementClient
@@ -473,6 +520,26 @@ export class KontentServiceFixed {
           
           console.log(`🔧 Creating language variant for migrated item...`);
           
+          // Pre-process parent references recursively BEFORE creating the variant
+          let parentReferences: any[] = [];
+          const originalParentField = referencedItem.data.item.elements.parent_tag;
+          if (originalParentField && Array.isArray(originalParentField.value) && originalParentField.value.length > 0) {
+            console.log(`🔗 Processing parent references for ${migratedCodename}:`, originalParentField.value);
+            
+            // Recursively migrate parent references
+            for (const parentCodename of originalParentField.value) {
+              console.log(`🔄 Recursively migrating parent: ${parentCodename}`);
+              const migratedParentCodename = await this.handleLinkedItemMigration(
+                parentCodename,
+                sourceContentType,
+                targetContentType
+              );
+              parentReferences.push({ codename: migratedParentCodename });
+            }
+            
+            console.log(`✅ Migrated parent references:`, parentReferences);
+          }
+          
           const migratedVariant = await this.managementClient
             .upsertLanguageVariant()
             .byItemId(newMigratedItem.data.id)
@@ -487,16 +554,8 @@ export class KontentServiceFixed {
                 value: originalName
               }));
               
-              // Handle parent references recursively
-              const originalParentField = referencedItem.data.item.elements.parent_tag;
-              if (originalParentField && Array.isArray(originalParentField.value) && originalParentField.value.length > 0) {
-                console.log(`🔗 Processing parent references for ${migratedCodename}:`, originalParentField.value);
-                
-                // For now, copy the parent references as-is (could be made recursive)
-                const parentReferences = originalParentField.value.map((parentCodename: string) => ({
-                  codename: parentCodename
-                }));
-                
+              // Add parent references if they exist
+              if (parentReferences.length > 0) {
                 elements.push(builder.linkedItemsElement({
                   element: { codename: 'parent_page_type_tag' },
                   value: parentReferences
@@ -509,6 +568,19 @@ export class KontentServiceFixed {
           
           console.log(`✅ Created language variant for migrated item: ${migratedVariant.data.item.id}`);
           
+          // Register this auto-migrated item
+          this.createdItemsRegistry.push({
+            originalCodename: referencedCodename,
+            originalName: referencedItem.data.item.system.name,
+            originalType: sourceContentType.codename,
+            newCodename: migratedCodename,
+            newName: newMigratedItem.data.name,
+            newType: targetContentType.codename,
+            newId: newMigratedItem.data.id,
+            wasAutoMigrated: true, // This item was auto-migrated during recursive linked item migration
+            alreadyExisted: false, // ← This is a newly created item
+          });
+          
           return migratedCodename;
         }
       } else {
@@ -520,6 +592,63 @@ export class KontentServiceFixed {
       // Fall back to original codename if there's an error
       return referencedCodename;
     }
+  }
+
+  /**
+   * Get a formatted summary of all items created during the last migration
+   */
+  getCreatedItemsSummary(): string {
+    if (this.createdItemsRegistry.length === 0) {
+      return '📋 No items were created during migration.';
+    }
+
+    const mainItems = this.createdItemsRegistry.filter(item => !item.wasAutoMigrated);
+    const autoMigratedItems = this.createdItemsRegistry.filter(item => item.wasAutoMigrated);
+    const newItems = this.createdItemsRegistry.filter(item => !item.alreadyExisted);
+    const existingItems = this.createdItemsRegistry.filter(item => item.alreadyExisted);
+
+    let summary = '\n📋 ========== MIGRATION SUMMARY ==========\n\n';
+    summary += `✅ Total items processed: ${this.createdItemsRegistry.length}\n`;
+    summary += `   └─ Main items: ${mainItems.length}\n`;
+    summary += `   └─ Auto-migrated linked items: ${autoMigratedItems.length}\n`;
+    summary += `   └─ New items created: ${newItems.length}\n`;
+    summary += `   └─ Items already existed (skipped): ${existingItems.length}\n\n`;
+
+    if (mainItems.length > 0) {
+      summary += '🎯 MAIN ITEMS MIGRATED:\n';
+      mainItems.forEach((item, index) => {
+        summary += `\n${index + 1}. "${item.originalName}"${item.alreadyExisted ? ' ⚠️ ALREADY EXISTED' : ''}\n`;
+        summary += `   Original: [${item.originalType}] ${item.originalCodename}\n`;
+        summary += `   New:      [${item.newType}] ${item.newCodename}\n`;
+        summary += `   ID:       ${item.newId}\n`;
+        if (item.alreadyExisted) {
+          summary += `   Status:   ⚠️ Skipped (already migrated)\n`;
+        }
+      });
+    }
+
+    if (autoMigratedItems.length > 0) {
+      summary += '\n\n🔗 AUTO-MIGRATED LINKED ITEMS:\n';
+      autoMigratedItems.forEach((item, index) => {
+        summary += `\n${index + 1}. "${item.originalName}"${item.alreadyExisted ? ' ⚠️ ALREADY EXISTED' : ''}\n`;
+        summary += `   Original: [${item.originalType}] ${item.originalCodename}\n`;
+        summary += `   New:      [${item.newType}] ${item.newCodename}\n`;
+        summary += `   ID:       ${item.newId}\n`;
+        if (item.alreadyExisted) {
+          summary += `   Status:   ⚠️ Skipped (already migrated)\n`;
+        }
+      });
+    }
+
+    summary += '\n========================================\n';
+    return summary;
+  }
+
+  /**
+   * Clear the created items registry
+   */
+  clearCreatedItemsRegistry(): void {
+    this.createdItemsRegistry = [];
   }
 }
 

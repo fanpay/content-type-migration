@@ -108,6 +108,7 @@ export default function App() {
               newItemId: migrationResult.newItem?.id || 'unknown',
               message: `Successfully migrated "${item.name}" from ${migrationConfig.sourceContentType.name} to ${migrationConfig.targetContentType.name}`,
               timestamp: new Date(),
+              createdItems: migrationResult.createdItems || [], // ← AGREGAR ITEMS CREADOS
             });
           } else {
             results.push({
@@ -116,6 +117,7 @@ export default function App() {
               newItemId: null,
               message: `Failed to migrate "${item.name}": ${migrationResult.error}`,
               timestamp: new Date(),
+              createdItems: [], // ← AGREGAR ARRAY VACÍO PARA ERRORES
             });
           }
           
@@ -127,6 +129,7 @@ export default function App() {
             newItemId: null,
             message: `Failed to migrate "${item.name}": ${itemError instanceof Error ? itemError.message : 'Unknown error'}`,
             timestamp: new Date(),
+            createdItems: [], // ← AGREGAR ARRAY VACÍO PARA EXCEPCIONES
           });
         }
       }

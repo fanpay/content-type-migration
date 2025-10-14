@@ -1,11 +1,24 @@
 import { useState } from 'react';
 
+interface CreatedItemInfo {
+  originalCodename: string;
+  originalName: string;
+  originalType: string;
+  newCodename: string;
+  newName: string;
+  newType: string;
+  newId: string;
+  wasAutoMigrated: boolean;
+  alreadyExisted: boolean; // Nueva propiedad para items que ya existían
+}
+
 interface MigrationResult {
   sourceItem: any;
   status: 'success' | 'error';
   newItemId: string | null;
   message: string;
   timestamp: Date;
+  createdItems?: CreatedItemInfo[]; // Nueva propiedad para items creados
 }
 
 interface MigrationResultsModalProps {
@@ -119,6 +132,85 @@ export function MigrationResultsModal({
                         <div><strong>New Item ID:</strong> {result.newItemId}</div>
                       )}
                       <div><strong>Completed:</strong> {result.timestamp.toLocaleString()}</div>
+                      
+                      {/* Show created items summary */}
+                      {result.createdItems && result.createdItems.length > 0 && (
+                        <div className="mt-4 pt-3 border-t border-gray-300">
+                          <div className="font-semibold text-gray-700 mb-2">
+                            📋 Items Created ({result.createdItems.length} total)
+                          </div>
+                          
+                          {/* Main items */}
+                          {result.createdItems.filter(item => !item.wasAutoMigrated).length > 0 && (
+                            <div className="mb-3">
+                              <div className="text-xs font-semibold text-blue-700 mb-1">
+                                🎯 Main Item:
+                              </div>
+                              {result.createdItems
+                                .filter(item => !item.wasAutoMigrated)
+                                .map((item) => (
+                                  <div key={item.newId} className={`ml-3 mb-2 p-2 rounded border ${
+                                    item.alreadyExisted 
+                                      ? 'bg-yellow-50 border-yellow-300' 
+                                      : 'bg-blue-50 border-blue-200'
+                                  }`}>
+                                    <div className="flex items-center gap-2">
+                                      {item.alreadyExisted && (
+                                        <span className="text-yellow-600 text-xs font-semibold">⚠️ ALREADY EXISTED</span>
+                                      )}
+                                      <div className="font-medium text-sm">{item.newName}</div>
+                                    </div>
+                                    <div className="text-xs text-gray-600">
+                                      <div>Original: [{item.originalType}] {item.originalCodename}</div>
+                                      <div>New: [{item.newType}] {item.newCodename}</div>
+                                      <div className="text-gray-500">ID: {item.newId}</div>
+                                      {item.alreadyExisted && (
+                                        <div className="text-yellow-600 font-medium mt-1">
+                                          Status: Skipped (already migrated)
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                            </div>
+                          )}
+                          
+                          {/* Auto-migrated items */}
+                          {result.createdItems.filter(item => item.wasAutoMigrated).length > 0 && (
+                            <div>
+                              <div className="text-xs font-semibold text-green-700 mb-1">
+                                🔗 Auto-Migrated Linked Items ({result.createdItems.filter(item => item.wasAutoMigrated).length}):
+                              </div>
+                              {result.createdItems
+                                .filter(item => item.wasAutoMigrated)
+                                .map((item) => (
+                                  <div key={item.newId} className={`ml-3 mb-2 p-2 rounded border ${
+                                    item.alreadyExisted 
+                                      ? 'bg-yellow-50 border-yellow-300' 
+                                      : 'bg-green-50 border-green-200'
+                                  }`}>
+                                    <div className="flex items-center gap-2">
+                                      {item.alreadyExisted && (
+                                        <span className="text-yellow-600 text-xs font-semibold">⚠️ ALREADY EXISTED</span>
+                                      )}
+                                      <div className="font-medium text-sm">{item.newName}</div>
+                                    </div>
+                                    <div className="text-xs text-gray-600">
+                                      <div>Original: [{item.originalType}] {item.originalCodename}</div>
+                                      <div>New: [{item.newType}] {item.newCodename}</div>
+                                      <div className="text-gray-500">ID: {item.newId}</div>
+                                      {item.alreadyExisted && (
+                                        <div className="text-yellow-600 font-medium mt-1">
+                                          Status: Skipped (already migrated)
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
