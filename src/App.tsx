@@ -8,6 +8,7 @@ import { DebugPanel } from './components/DebugPanel';
 import { MigrationResultsModal } from './components/MigrationResultsModal';
 import { ItemRelationshipsViewer } from './components/ItemRelationshipsViewer';
 import { MigrationLogger, LogEntry } from './components/MigrationLogger';
+import { EnvironmentBadge } from './components/EnvironmentBadge';
 import { useContentTypes } from './hooks/useKontentData';
 import { useMigration } from './hooks/useMigration';
 import { ContentTypeInfo } from './types';
@@ -355,6 +356,9 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Environment Badge */}
+      <EnvironmentBadge />
+      
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <h1 className="text-3xl font-bold text-gray-900">Content Type Migration</h1>

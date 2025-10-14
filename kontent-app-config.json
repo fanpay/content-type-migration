@@ -10,6 +10,10 @@
     "content_type:read",
     "language:read"
   ],
+  "parameters": {
+    "managementApiKey": "YOUR_MANAGEMENT_API_KEY",
+    "previewApiKey": "YOUR_PREVIEW_API_KEY"
+  },
   "author": {
     "name": "Felipe Payan",
     "email": "felipe.payan@example.com"

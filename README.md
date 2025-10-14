@@ -16,8 +16,11 @@ A production-ready custom application for Kontent.ai that enables seamless migra
 - **Comprehensive Logging**: Real-time UI logger with color-coded messages
 - **Responsive Interface**: Modern design with Tailwind CSS
 - **Step-by-Step Workflow**: Guided 5-step migration process
+- **🆕 Dual Configuration Mode**: Works as standalone app or Kontent.ai Custom App with SDK integration
+- **🆕 Environment Badge**: Visual indicator showing current environment and user info
 
 📚 **For detailed feature documentation, see [FEATURES.md](./FEATURES.md)**
+📋 **For Custom App configuration in Kontent.ai, see [CUSTOM_APP_CONFIG.md](./CUSTOM_APP_CONFIG.md)**
 
 ## 🏗️ Architecture
 
@@ -490,6 +493,32 @@ log('error', 'Migration failed', error.message);
 ```
 
 ## 📖 Usage Guide
+
+### Configuration
+
+The application supports two configuration modes:
+
+#### Mode 1: Local Development (.env file)
+```env
+VITE_KONTENT_PROJECT_ID=your-project-id
+VITE_KONTENT_MANAGEMENT_API_KEY=your-management-api-key
+VITE_KONTENT_PREVIEW_API_KEY=your-preview-api-key
+```
+
+#### Mode 2: Kontent.ai Custom App (JSON Parameters)
+Configure in **Environment settings > Custom apps > Parameters (JSON)**:
+```json
+{
+  "managementApiKey": "your-key",
+  "previewApiKey": "your-key"
+}
+```
+
+✨ **Simple!** The `environmentId` is obtained automatically from the SDK context.
+
+**Priority**: SDK JSON parameters > Environment variables
+
+📋 **For complete Custom App setup instructions, see [CUSTOM_APP_CONFIG.md](./CUSTOM_APP_CONFIG.md)**
 
 ### Quick Start
 

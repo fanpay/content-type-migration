@@ -1,6 +1,7 @@
 import { 
   DeliveryClient,
 } from '@kontent-ai/delivery-sdk';
+import { getKontentConfig } from '../config/appConfig';
 
 export interface MigrationItem {
   id: string;
@@ -28,48 +29,45 @@ export interface CreatedItemInfo {
 
 export class KontentServiceFixed {
   private managementClient: any;
-  private deliveryClient: DeliveryClient;
+  private deliveryClient: DeliveryClient | null = null;
   private createdItemsRegistry: CreatedItemInfo[] = []; // Registry of all items created during migration
   private initializationPromise: Promise<void>;
 
   constructor() {
-    const projectId = import.meta.env.VITE_KONTENT_PROJECT_ID;
-    const managementApiKey = import.meta.env.VITE_KONTENT_MANAGEMENT_API_KEY;
-    const previewApiKey = import.meta.env.VITE_KONTENT_PREVIEW_API_KEY;
-
-    if (!projectId || !managementApiKey || !previewApiKey) {
-      throw new Error('Missing required environment variables');
-    }
-
-    // Initialize Management Client (dynamic import to handle ES modules)
-    this.initializationPromise = this.initializeManagementClient(projectId, managementApiKey);
-
-    // Initialize Delivery Client
-    this.deliveryClient = new DeliveryClient({
-      environmentId: projectId,
-      previewApiKey,
-      defaultQueryConfig: {
-        usePreviewMode: true,
-      },
-    });
+    // Initialize both clients asynchronously with config from SDK or .env
+    this.initializationPromise = this.initializeClients();
   }
 
-  private async initializeManagementClient(projectId: string, managementApiKey: string) {
+  private async initializeClients() {
     try {
+      // Get configuration from SDK or .env
+      const config = await getKontentConfig();
+
+      // Initialize Management Client
       const { ManagementClient } = await import('@kontent-ai/management-sdk');
       this.managementClient = new ManagementClient({
-        environmentId: projectId,
-        apiKey: managementApiKey,
+        environmentId: config.environmentId,
+        apiKey: config.managementApiKey,
+      });
+
+      // Initialize Delivery Client
+      this.deliveryClient = new DeliveryClient({
+        environmentId: config.environmentId,
+        previewApiKey: config.previewApiKey,
+        defaultQueryConfig: {
+          usePreviewMode: true,
+        },
       });
     } catch (error) {
-      console.error('Failed to initialize Management Client:', error);
+      console.error('Failed to initialize Kontent.ai clients:', error);
+      throw error;
     }
   }
 
   private async ensureInitialized() {
     await this.initializationPromise;
-    if (!this.managementClient) {
-      throw new Error('Management client not initialized');
+    if (!this.managementClient || !this.deliveryClient) {
+      throw new Error('Kontent.ai clients not initialized');
     }
   }
 
@@ -102,8 +100,10 @@ export class KontentServiceFixed {
    * Get all content items of a specific type
    */
   async getContentItems(contentTypeCodename: string, language: string = 'default'): Promise<any[]> {
+    await this.ensureInitialized();
+    
     try {
-      const items = await this.deliveryClient
+      const items = await this.deliveryClient!
         .items()
         .type(contentTypeCodename)
         .languageParameter(language)
@@ -150,7 +150,7 @@ export class KontentServiceFixed {
 
       // Step 1: Get source content with complete data using Delivery API
       log('info', '  → Step 1: Fetching source item data...');
-      const sourceItemData = await this.deliveryClient
+      const sourceItemData = await this.deliveryClient!
         .item(sourceItem.codename)
         .depthParameter(1)
         .languageParameter(sourceLanguage)
@@ -516,7 +516,7 @@ export class KontentServiceFixed {
       // Step 1: Get the referenced item details
       console.log(`🔍 Checking if ${referencedCodename} needs migration...`);
       
-      const referencedItem = await this.deliveryClient
+      const referencedItem = await this.deliveryClient!
         .item(referencedCodename)
         .toPromise();
 
@@ -533,7 +533,7 @@ export class KontentServiceFixed {
         try {
           // Step 4: Check if migrated version already exists
           console.log(`🔍 Checking if ${migratedCodename} already exists...`);
-          const existingItem = await this.deliveryClient.item(migratedCodename).toPromise();
+          const existingItem = await this.deliveryClient!.item(migratedCodename).toPromise();
           console.log(`✅ Migrated version already exists: ${migratedCodename}`);
           
           // Register that this item already existed
