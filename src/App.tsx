@@ -6,6 +6,7 @@ import { ConnectionStatus } from './components/ConnectionStatus';
 import { DryRunPreview } from './components/DryRunPreview';
 import { DebugPanel } from './components/DebugPanel';
 import { MigrationResultsModal } from './components/MigrationResultsModal';
+import { ItemRelationshipsViewer } from './components/ItemRelationshipsViewer';
 import { useContentTypes } from './hooks/useKontentData';
 import { useMigration } from './hooks/useMigration';
 import { ContentTypeInfo } from './types';
@@ -21,6 +22,8 @@ export default function App() {
   const [migrationInProgress, setMigrationInProgress] = useState(false);
   const [migrationResults, setMigrationResults] = useState<any[]>([]);
   const [showResults, setShowResults] = useState(false);
+  const [updateIncomingReferences, setUpdateIncomingReferences] = useState(false);
+  const [itemRelationships, setItemRelationships] = useState<any[]>([]);
   
   const { contentTypes, isLoading: typesLoading, error: typesError } = useContentTypes();
   const { 
@@ -66,7 +69,20 @@ export default function App() {
   }, []);
 
   const handleContinueToExecution = () => {
-    console.log('🎯 Continuing to execution with', selectedItems.length, 'items');
+    console.log('🎯 Continuing to relationships view with', selectedItems.length, 'items');
+    setStep(4);
+  };
+
+  const handleContinueToMigration = (data: { updateIncomingReferences: boolean; relationships: any[] }) => {
+    console.log('🚀 Moving to migration execution');
+    console.log('📊 Update incoming references:', data.updateIncomingReferences);
+    console.log('📊 Relationships:', data.relationships.length);
+    setUpdateIncomingReferences(data.updateIncomingReferences);
+    setItemRelationships(data.relationships);
+    setStep(5);
+  };
+
+  const handleBackToRelationships = () => {
     setStep(4);
   };
 
@@ -134,6 +150,54 @@ export default function App() {
         }
       }
       
+      // Update incoming references if enabled
+      if (updateIncomingReferences && itemRelationships.length > 0) {
+        console.log('🔄 Updating incoming references...');
+        
+        for (const relationship of itemRelationships) {
+          if (relationship.incomingRelationships.length === 0) continue;
+          
+          // Find the migration result for this item
+          const migrationResult = results.find(r => r.sourceItem.id === relationship.itemId);
+          if (!migrationResult || migrationResult.status !== 'success') {
+            console.log(`⚠️ Skipping reference update for ${relationship.itemName} - migration failed or not found`);
+            continue;
+          }
+          
+          const newItemId = migrationResult.newItemId;
+          const oldItemCodename = relationship.itemCodename;
+          
+          console.log(`📝 Updating ${relationship.incomingRelationships.length} incoming references for ${relationship.itemName}`);
+          
+          for (const incomingRef of relationship.incomingRelationships) {
+            try {
+              console.log(`  → Updating ${incomingRef.fromItemName}`);
+              console.log(`     Item codename: ${incomingRef.fromItemCodename}`);
+              console.log(`     Field codename: ${incomingRef.fieldName}`);
+              console.log(`     Old reference: ${oldItemCodename}`);
+              console.log(`     New reference: ${newItemId}`);
+              
+              // Use the new updateItemReference function
+              const updateResult = await kontentServiceFixed.updateItemReference(
+                incomingRef.fromItemCodename,
+                incomingRef.fieldName,
+                oldItemCodename,
+                newItemId,
+                selectedLanguage
+              );
+              
+              if (updateResult.success) {
+                console.log(`  ✅ Successfully updated reference in ${incomingRef.fromItemName}`);
+              } else {
+                console.error(`  ❌ Failed to update reference: ${updateResult.error}`);
+              }
+            } catch (refError) {
+              console.error(`Failed to update reference in ${incomingRef.fromItemName}:`, refError);
+            }
+          }
+        }
+      }
+      
       setMigrationResults(results);
       setShowResults(true);
       console.log('✅ Migration completed!', results);
@@ -196,6 +260,17 @@ export default function App() {
           step >= 4 ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'
         }`}>
           4
+        </div>
+        <span>View Relationships</span>
+      </div>
+
+      <div className={`w-8 h-0.5 ${step >= 5 ? 'bg-blue-600' : 'bg-gray-200'}`}></div>
+      
+      <div className={`flex items-center space-x-2 ${step >= 5 ? 'text-blue-600' : 'text-gray-400'}`}>
+        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
+          step >= 5 ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'
+        }`}>
+          5
         </div>
         <span>Execute Migration</span>
       </div>
@@ -339,7 +414,7 @@ export default function App() {
                   className="px-8 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium"
                   disabled={selectedItems.length === 0}
                 >
-                  Continue to Migration ({selectedItems.length} items) →
+                  Continue to Relationships View ({selectedItems.length} items) →
                 </button>
               </div>
             </div>
@@ -348,13 +423,23 @@ export default function App() {
 
         {step === 4 && (
           <div className="bg-white rounded-lg shadow-md p-6">
+            <ItemRelationshipsViewer
+              selectedItems={selectedItems}
+              onContinue={handleContinueToMigration}
+              onBack={handleBackToItemSelection}
+            />
+          </div>
+        )}
+
+        {step === 5 && (
+          <div className="bg-white rounded-lg shadow-md p-6">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl font-semibold text-gray-900">Execute Migration</h2>
               <button
-                onClick={handleBackToItemSelection}
+                onClick={handleBackToRelationships}
                 className="px-4 py-2 text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200"
               >
-                ← Back to Item Selection
+                ← Back to Relationships
               </button>
             </div>
             
@@ -365,6 +450,17 @@ export default function App() {
                 <div>Target: {targetContentType?.name}</div>
                 <div>Items to migrate: {selectedItems.length}</div>
                 <div>Mapped fields: {migrationConfig?.fieldMappings.filter(m => m.targetField).length}</div>
+                {updateIncomingReferences && (
+                  <div className="mt-3 pt-3 border-t border-blue-300">
+                    <div className="flex items-center text-blue-900 font-medium">
+                      <span className="mr-2" role="img" aria-label="sync">🔄</span>
+                      Update incoming references: Enabled
+                    </div>
+                    <div className="ml-6 mt-1">
+                      Total items to update: {itemRelationships.reduce((sum, rel) => sum + rel.incomingRelationships.length, 0)}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
             

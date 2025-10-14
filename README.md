@@ -11,8 +11,9 @@ A custom application for Kontent.ai that allows migrating content items from one
 - **Recursive Migration**: Automatically migrates linked items of the same type
 - **Migration Reports**: Comprehensive reporting in console and UI
 - **Skip Duplicates**: Detects and skips already migrated items
+- **Relationship Viewer**: Visual analysis of item relationships before migration
 - **Responsive Interface**: Modern design with Tailwind CSS
-- **Step-by-Step Process**: Guided workflow in 3 steps
+- **Step-by-Step Process**: Guided workflow in 5 steps
 
 📚 **For detailed feature documentation, see [FEATURES.md](./FEATURES.md)**
 
@@ -94,11 +95,38 @@ The application will be available at **`https://localhost:3001`** (note the HTTP
    - Same codename
    - Same display name (case insensitive)
 
-### Step 3: Migration Execution
+### Step 3: Item Selection
 
-1. **Item Selection**: Choose which content items to migrate
-2. **Final Review**: Confirm the migration configuration
-3. **Execution**: Monitor migration progress
+1. Choose which content items to migrate from the source content type
+2. Select language variant
+3. Review selected items count
+
+### Step 4: Relationship Analysis
+
+1. **Automatic Analysis**: The system analyzes all selected items for relationships
+2. **Dual Direction Analysis**:
+   - **Outgoing Relationships** (→): Items that your selected content references
+   - **Incoming Relationships** (←): Items that reference your selected content
+3. **Visual Display**: Expandable cards for each item showing:
+   - **Blue cards**: Outgoing relationships with field names and referenced items
+   - **Green cards**: Incoming relationships showing which items use this content
+4. **Summary Statistics**:
+   - Total selected items
+   - Items with relationships
+   - Total relationship count (outgoing + incoming)
+5. **Items without relationships**: Clearly listed for transparency
+
+**Example**: If you select a tag `_l2_page_type__contact_us`:
+- **Outgoing**: Shows items the tag references (if any)
+- **Incoming**: Shows pages like `mari_contact_page` that use this tag
+
+📚 **For detailed relationship documentation, see [RELATIONSHIPS.md](./RELATIONSHIPS.md)**
+
+### Step 5: Migration Execution
+
+1. **Final Review**: Confirm the migration configuration
+2. **Preview**: Optional dry-run preview
+3. **Execution**: Monitor migration progress with real-time updates
 
 ## 🎯 Advanced Features
 

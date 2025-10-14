@@ -17,9 +17,9 @@
     "setup": "./setup.sh"
   },
   "dependencies": {
-    "@kontent-ai/delivery-sdk": "^14.8.0",
-    "@kontent-ai/management-sdk": "^5.8.0",
-    "@kontent-ai/smart-link": "^3.1.0",
+    "@kontent-ai/delivery-sdk": "^16.3.0",
+    "@kontent-ai/management-sdk": "^7.11.0",
+    "@kontent-ai/smart-link": "^5.0.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "lucide-react": "^0.263.1",

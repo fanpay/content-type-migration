@@ -650,6 +650,234 @@ export class KontentServiceFixed {
   clearCreatedItemsRegistry(): void {
     this.createdItemsRegistry = [];
   }
+
+  /**
+   * Update a modular content field reference in a language variant
+   * @param itemCodename - Codename of the item to update
+   * @param fieldCodename - Codename of the field to update
+   * @param oldReference - Old item codename to replace
+   * @param newReference - New item codename to use
+   * @param languageCodename - Language variant to update
+   */
+  async updateItemReference(
+    itemCodename: string,
+    fieldCodename: string,
+    oldReference: string,
+    newReference: string,
+    languageCodename: string = 'en'
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      console.log(`🔄 Updating reference in ${itemCodename}.${fieldCodename}: ${oldReference} → ${newReference}`);
+
+      // Step 1: Get the item to find its content type
+      const item = await this.managementClient
+        .viewContentItem()
+        .byItemCodename(itemCodename)
+        .toPromise();
+
+      if (!item.data) {
+        throw new Error(`Item ${itemCodename} not found`);
+      }
+
+      console.log(`📦 Item data structure:`, JSON.stringify(item.data, null, 2));
+      
+      // The Management API returns type as { id: "..." }, not codename
+      const contentTypeId = item.data.type?.id;
+      
+      if (!contentTypeId) {
+        throw new Error(`Content type ID not found for item ${itemCodename}`);
+      }
+      
+      console.log(`📦 Content type ID: ${contentTypeId}`);
+
+      // Step 2: Get the content type using ID to map field codenames to IDs
+      const contentType = await this.managementClient
+        .viewContentType()
+        .byTypeId(contentTypeId)  // Use ID instead of codename
+        .toPromise();
+
+      if (!contentType.data) {
+        throw new Error(`Content type with ID ${contentTypeId} not found`);
+      }
+
+      // Step 3: Find the field ID from the content type
+      const typeElement = contentType.data.elements.find((el: any) => el.codename === fieldCodename);
+
+      if (!typeElement) {
+        throw new Error(`Field ${fieldCodename} not found in content type ${contentType.data.codename}`);
+      }
+
+      const fieldId = typeElement.id;
+      console.log(`� Field ID for ${fieldCodename}: ${fieldId}`);
+
+      // Step 4: Get current language variant
+      const variant = await this.managementClient
+        .viewLanguageVariant()
+        .byItemCodename(itemCodename)
+        .byLanguageCodename(languageCodename)
+        .toPromise();
+
+      if (!variant.data) {
+        throw new Error(`Language variant not found for ${itemCodename} in ${languageCodename}`);
+      }
+
+      // Step 5: Find the field in the variant using the ID
+      const currentElements = variant.data.elements || [];
+      const fieldElement = currentElements.find((el: any) => el.element.id === fieldId);
+
+      if (!fieldElement) {
+        throw new Error(`Field element with ID ${fieldId} not found in variant`);
+      }
+
+      // Step 6: Get the ID of the old item (by codename)
+      let oldItemId: string;
+      try {
+        const oldItem = await this.managementClient
+          .viewContentItem()
+          .byItemCodename(oldReference)
+          .toPromise();
+        oldItemId = oldItem.data.id;
+        console.log(`🔍 Old item ${oldReference} has ID: ${oldItemId}`);
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+        throw new Error(`Could not find old item ${oldReference}: ${errorMsg}`);
+      }
+
+      // Step 7: Update the value - replace old reference ID with new one
+      let updatedValue = fieldElement.value;
+      
+      if (Array.isArray(fieldElement.value)) {
+        // For modular_content fields (array of reference objects with IDs)
+        updatedValue = fieldElement.value.map((ref: any) => {
+          // The value might be an object with id, or just a string
+          const refId = typeof ref === 'object' && ref.id ? ref.id : ref;
+          
+          if (refId === oldItemId) {
+            return { id: newReference };  // newReference is already an ID
+          }
+          return typeof ref === 'object' ? ref : { id: ref };
+        });
+      } else {
+        console.warn(`Field ${fieldCodename} is not an array, cannot update reference`);
+        return { success: false, error: 'Field is not a modular content type' };
+      }
+
+      console.log(`  Original value:`, fieldElement.value);
+      console.log(`  Updated value:`, updatedValue);
+
+      // Step 8: Update the language variant - ONLY send the element we're updating
+      // The Management API allows partial updates, we don't need to send all elements
+      await this.managementClient
+        .upsertLanguageVariant()
+        .byItemCodename(itemCodename)
+        .byLanguageCodename(languageCodename)
+        .withData(() => ({
+          elements: [
+            {
+              element: {
+                id: fieldId
+              },
+              value: updatedValue
+            }
+          ]
+        }))
+        .toPromise();
+
+      console.log(`✅ Successfully updated reference in ${itemCodename}`);
+      
+      return { 
+        success: true 
+      };
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`❌ Failed to update reference:`, errorMessage);
+      return { 
+        success: false, 
+        error: errorMessage 
+      };
+    }
+  }
+
+  /**
+   * Update multiple references in an item (batch update for the same item)
+   * @param itemCodename - Codename of the item to update
+   * @param updates - Array of { fieldCodename, oldReference, newReference }
+   * @param languageCodename - Language variant to update
+   */
+  async updateMultipleReferences(
+    itemCodename: string,
+    updates: Array<{ fieldCodename: string; oldReference: string; newReference: string }>,
+    languageCodename: string = 'en'
+  ): Promise<{ success: boolean; updatedFields: number; error?: string }> {
+    try {
+      console.log(`🔄 Updating ${updates.length} references in ${itemCodename}`);
+
+      // Step 1: Get current language variant
+      const variant = await this.managementClient
+        .viewLanguageVariant()
+        .byItemCodename(itemCodename)
+        .byLanguageCodename(languageCodename)
+        .toPromise();
+
+      if (!variant.data) {
+        throw new Error(`Language variant not found for ${itemCodename} in ${languageCodename}`);
+      }
+
+      // Step 2: Prepare updated elements
+      const currentElements = variant.data.elements || [];
+      let updatedCount = 0;
+
+      const elementsToUpdate = currentElements.map((el: any) => {
+        // Find if this field needs to be updated
+        const update = updates.find(u => u.fieldCodename === el.element.codename);
+        
+        if (update && Array.isArray(el.value)) {
+          updatedCount++;
+          const updatedValue = el.value.map((codename: string) => 
+            codename === update.oldReference ? update.newReference : codename
+          );
+          
+          console.log(`  ${el.element.codename}: ${update.oldReference} → ${update.newReference}`);
+          
+          return {
+            element: {
+              codename: el.element.codename
+            },
+            value: updatedValue
+          };
+        }
+        
+        return el;
+      });
+
+      // Step 3: Update the language variant
+      await this.managementClient
+        .upsertLanguageVariant()
+        .byItemCodename(itemCodename)
+        .byLanguageCodename(languageCodename)
+        .withData(() => ({
+          elements: elementsToUpdate
+        }))
+        .toPromise();
+
+      console.log(`✅ Successfully updated ${updatedCount} fields in ${itemCodename}`);
+      
+      return { 
+        success: true,
+        updatedFields: updatedCount
+      };
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`❌ Failed to update references:`, errorMessage);
+      return { 
+        success: false,
+        updatedFields: 0,
+        error: errorMessage 
+      };
+    }
+  }
 }
 
 // Export singleton instance
