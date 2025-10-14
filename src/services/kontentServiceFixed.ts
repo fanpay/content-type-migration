@@ -249,7 +249,7 @@ export class KontentServiceFixed {
       const newItem = await this.managementClient
         .addContentItem()
         .withData({
-          name: `[MIGRATED] ${sourceItem.name}`,
+          name: `${sourceItem.name}`,
           type: {
             codename: targetContentType.codename,
           },
@@ -777,6 +777,58 @@ export class KontentServiceFixed {
   }
 
   /**
+   * Get language variant with fallback to default language if not found
+   * Returns null variant if not found in either language (for graceful skipping)
+   */
+  private async getLanguageVariantWithFallback(
+    itemCodename: string,
+    languageCodename: string
+  ): Promise<{ variant: any | null; actualLanguage: string }> {
+    try {
+      const variant = await this.managementClient
+        .viewLanguageVariant()
+        .byItemCodename(itemCodename)
+        .byLanguageCodename(languageCodename)
+        .toPromise();
+      
+      return { variant, actualLanguage: languageCodename };
+    } catch (error: any) {
+      // Check if it's a 404 error (variant not found)
+      const is404 = error?.response?.status === 404 || 
+                    error?.status === 404 || 
+                    error?.code === 'ERR_BAD_REQUEST' ||
+                    (error?.message && (error.message.includes('404') || error.message.includes('not found')));
+      
+      if (is404) {
+        console.warn(`⚠️ Language variant "${languageCodename}" not found for item "${itemCodename}". Trying default language...`);
+        
+        try {
+          // Try to get default language variant
+          const variant = await this.managementClient
+            .viewLanguageVariant()
+            .byItemCodename(itemCodename)
+            .byLanguageId('00000000-0000-0000-0000-000000000000')
+            .toPromise();
+          
+          console.log(`✅ Using default language variant instead`);
+          return { variant, actualLanguage: 'default' };
+        } catch (defaultError) {
+          // Item doesn't exist in migration language or default - skip with warning
+          console.warn(`⚠️ Item "${itemCodename}" not found in language "${languageCodename}" or default. Skipping...`);
+          return { variant: null, actualLanguage: 'not_found' };
+        }
+      } else {
+        // Re-throw non-404 errors
+        throw error;
+      }
+    }
+  }
+
+  /**
+   * Update a modular content field reference in a language variant
+   */
+
+  /**
    * Update a modular content field reference in a language variant
    * @param itemCodename - Codename of the item to update
    * @param fieldCodename - Codename of the field to update
@@ -836,16 +888,30 @@ export class KontentServiceFixed {
       const fieldId = typeElement.id;
       console.log(`� Field ID for ${fieldCodename}: ${fieldId}`);
 
-      // Step 4: Get current language variant
-      const variant = await this.managementClient
-        .viewLanguageVariant()
-        .byItemCodename(itemCodename)
-        .byLanguageCodename(languageCodename)
-        .toPromise();
+      // Step 4: Get current language variant with fallback to default
+      const { variant, actualLanguage } = await this.getLanguageVariantWithFallback(itemCodename, languageCodename);
+
+      // Skip if variant not found in any language
+      if (!variant) {
+        console.warn(`⚠️ Skipping reference update - item "${itemCodename}" not found in "${languageCodename}" or default language`);
+        return { success: false, error: 'Item not found in migration language' };
+      }
 
       if (!variant.data) {
-        throw new Error(`Language variant not found for ${itemCodename} in ${languageCodename}`);
+        throw new Error(`Language variant not found for ${itemCodename} in ${actualLanguage}`);
       }
+
+      // IMPORTANT: Only update if variant is in the requested language
+      // Skip items that only exist in default language when migrating to other languages
+      if (actualLanguage !== languageCodename) {
+        console.warn(`⏭️ Skipping reference update in "${itemCodename}" - item only exists in ${actualLanguage}, not in ${languageCodename}`);
+        return { 
+          success: false, 
+          error: `Item only exists in ${actualLanguage}, not in migration language ${languageCodename}` 
+        };
+      }
+
+      console.log(`📝 Working with language variant: ${actualLanguage}`);
 
       // Step 5: Find the field in the variant using the ID
       const currentElements = variant.data.elements || [];
@@ -897,7 +963,7 @@ export class KontentServiceFixed {
         await this.managementClient
           .createNewVersionOfLanguageVariant()
           .byItemCodename(itemCodename)
-          .byLanguageCodename(languageCodename)
+          .byLanguageCodename(actualLanguage)
           .toPromise();
         console.log(`📝 Created new draft version of ${itemCodename}`);
       } catch (err) {
@@ -911,7 +977,7 @@ export class KontentServiceFixed {
       await this.managementClient
         .upsertLanguageVariant()
         .byItemCodename(itemCodename)
-        .byLanguageCodename(languageCodename)
+        .byLanguageCodename(actualLanguage)
         .withData(() => ({
           elements: [
             {
@@ -954,16 +1020,34 @@ export class KontentServiceFixed {
     try {
       console.log(`🔄 Updating ${updates.length} references in ${itemCodename}`);
 
-      // Step 1: Get current language variant
-      const variant = await this.managementClient
-        .viewLanguageVariant()
-        .byItemCodename(itemCodename)
-        .byLanguageCodename(languageCodename)
-        .toPromise();
+      // Step 1: Get current language variant with fallback to default
+      const { variant, actualLanguage } = await this.getLanguageVariantWithFallback(itemCodename, languageCodename);
+
+      // Skip if variant not found in any language
+      if (!variant) {
+        console.warn(`⚠️ Skipping multiple reference updates - item "${itemCodename}" not found in "${languageCodename}" or default language`);
+        return { 
+          success: false, 
+          updatedFields: 0,
+          error: 'Item not found in migration language' 
+        };
+      }
 
       if (!variant.data) {
-        throw new Error(`Language variant not found for ${itemCodename} in ${languageCodename}`);
+        throw new Error(`Language variant not found for ${itemCodename} in ${actualLanguage}`);
       }
+
+      // IMPORTANT: Only update if variant is in the requested language
+      if (actualLanguage !== languageCodename) {
+        console.warn(`⏭️ Skipping reference updates in "${itemCodename}" - item only exists in ${actualLanguage}, not in ${languageCodename}`);
+        return { 
+          success: false, 
+          updatedFields: 0,
+          error: `Item only exists in ${actualLanguage}, not in migration language ${languageCodename}` 
+        };
+      }
+
+      console.log(`📝 Working with language variant: ${actualLanguage}`);
 
       // Step 2: Prepare updated elements
       const currentElements = variant.data.elements || [];
@@ -996,7 +1080,7 @@ export class KontentServiceFixed {
       await this.managementClient
         .upsertLanguageVariant()
         .byItemCodename(itemCodename)
-        .byLanguageCodename(languageCodename)
+        .byLanguageCodename(actualLanguage)
         .withData(() => ({
           elements: elementsToUpdate
         }))
