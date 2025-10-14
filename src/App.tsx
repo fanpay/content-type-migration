@@ -114,10 +114,15 @@ export default function App() {
       const results = [];
       const totalItems = selectedItems.length;
       
+      // Calculate total steps: migration items + reference updates (if enabled)
+      const totalReferences = updateIncomingReferences 
+        ? itemRelationships.reduce((sum, rel) => sum + rel.incomingRelationships.length, 0)
+        : 0;
+      const totalSteps = totalItems + totalReferences;
+      let completedSteps = 0;
+      
       for (let i = 0; i < totalItems; i++) {
         const item = selectedItems[i];
-        const progress = ((i + 1) / totalItems) * 100;
-        setMigrationProgress(progress);
         setCurrentMigrationStep(`Migrating item ${i + 1} of ${totalItems}: ${item.name}`);
         
         addLog('info', `📝 Migrating item ${i + 1}/${totalItems}`, item.name);
@@ -181,6 +186,11 @@ export default function App() {
             createdItems: [],
           });
         }
+        
+        // Update progress after each item migration
+        completedSteps++;
+        const progress = (completedSteps / totalSteps) * 100;
+        setMigrationProgress(progress);
       }
       
       // Update incoming references if enabled
@@ -230,6 +240,11 @@ export default function App() {
               const errorMsg = refError instanceof Error ? refError.message : 'Unknown error';
               addLog('error', `Failed to update reference in ${incomingRef.fromItemName}`, errorMsg);
             }
+            
+            // Update progress after each reference update
+            completedSteps++;
+            const progress = (completedSteps / totalSteps) * 100;
+            setMigrationProgress(progress);
           }
         }
       }
