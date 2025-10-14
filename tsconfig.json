@@ -21,5 +21,9 @@
     "noFallthroughCasesInSwitch": true
   },
   "include": ["src"],
+  "exclude": [
+    "src/services/kontentServiceReal.ts",
+    "src/services/migrationServiceReal.ts"
+  ],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

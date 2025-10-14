@@ -30,6 +30,7 @@ export class KontentServiceFixed {
   private managementClient: any;
   private deliveryClient: DeliveryClient;
   private createdItemsRegistry: CreatedItemInfo[] = []; // Registry of all items created during migration
+  private initializationPromise: Promise<void>;
 
   constructor() {
     const projectId = import.meta.env.VITE_KONTENT_PROJECT_ID;
@@ -41,7 +42,7 @@ export class KontentServiceFixed {
     }
 
     // Initialize Management Client (dynamic import to handle ES modules)
-    this.initializeManagementClient(projectId, managementApiKey);
+    this.initializationPromise = this.initializeManagementClient(projectId, managementApiKey);
 
     // Initialize Delivery Client
     this.deliveryClient = new DeliveryClient({
@@ -65,6 +66,62 @@ export class KontentServiceFixed {
     }
   }
 
+  private async ensureInitialized() {
+    await this.initializationPromise;
+    if (!this.managementClient) {
+      throw new Error('Management client not initialized');
+    }
+  }
+
+  /**
+   * Get all content types
+   */
+  async getContentTypes(): Promise<any[]> {
+    await this.ensureInitialized();
+    try {
+      const types = await this.managementClient.listContentTypes().toAllPromise();
+      return types.data.items.map((type: any) => ({
+        id: type.id,
+        codename: type.codename,
+        name: type.name,
+        elements: type.elements.map((el: any) => ({
+          id: el.id,
+          codename: el.codename,
+          name: el.name,
+          type: el.type,
+          is_required: el.is_required || false,
+        })),
+      }));
+    } catch (error) {
+      console.error('Failed to fetch content types:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all content items of a specific type
+   */
+  async getContentItems(contentTypeCodename: string, language: string = 'default'): Promise<any[]> {
+    try {
+      const items = await this.deliveryClient
+        .items()
+        .type(contentTypeCodename)
+        .languageParameter(language)
+        .toPromise();
+      
+      return items.data.items.map((item: any) => ({
+        id: item.system.id,
+        codename: item.system.codename,
+        name: item.system.name,
+        type: item.system.type,
+        lastModified: item.system.lastModified ? new Date(item.system.lastModified) : new Date(),
+      }));
+    } catch (error) {
+      console.error('Failed to fetch content items:', error);
+      throw error;
+    }
+  }
+
   /**
    * Complete migration function: creates new content item and language variant with field data
    */
@@ -76,6 +133,7 @@ export class KontentServiceFixed {
     sourceLanguage: string = 'en',
     logger?: (level: 'info' | 'success' | 'warning' | 'error', message: string, details?: string) => void
   ): Promise<{ success: boolean; newItem?: any; newVariant?: any; createdItems?: CreatedItemInfo[]; error?: string }> {
+    await this.ensureInitialized();
     try {
       // Reset the registry for this migration
       this.createdItemsRegistry = [];
@@ -453,6 +511,7 @@ export class KontentServiceFixed {
     sourceContentType: any,
     targetContentType: any
   ): Promise<string> {
+    await this.ensureInitialized();
     try {
       // Step 1: Get the referenced item details
       console.log(`🔍 Checking if ${referencedCodename} needs migration...`);
@@ -660,6 +719,7 @@ export class KontentServiceFixed {
     newReference: string,
     languageCodename: string = 'en'
   ): Promise<{ success: boolean; error?: string }> {
+    await this.ensureInitialized();
     try {
       console.log(`🔄 Updating reference in ${itemCodename}.${fieldCodename}: ${oldReference} → ${newReference}`);
 

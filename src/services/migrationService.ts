@@ -7,16 +7,38 @@ export class MigrationService {
   }
 
   static generateFieldMappings(sourceElements: any[], targetElements: any[]): FieldMapping[] {
+    // Validate inputs
+    if (!sourceElements || !Array.isArray(sourceElements)) {
+      console.error('Invalid sourceElements:', sourceElements);
+      return [];
+    }
+    if (!targetElements || !Array.isArray(targetElements)) {
+      console.error('Invalid targetElements:', targetElements);
+      return [];
+    }
+
     return sourceElements.map(sourceElement => {
+      // Validate source element
+      if (!sourceElement || !sourceElement.codename || !sourceElement.name) {
+        console.warn('Invalid source element:', sourceElement);
+        return {
+          sourceField: sourceElement || {},
+          targetField: null,
+          isCompatible: false,
+          transformationNeeded: false,
+          canTransform: false,
+        };
+      }
+
       // Try exact codename match first
       let targetElement = targetElements.find(
-        target => target.codename === sourceElement.codename
+        target => target && target.codename === sourceElement.codename
       );
 
       // If no exact match, try name match
       if (!targetElement) {
         targetElement = targetElements.find(
-          target => target.name.toLowerCase() === sourceElement.name.toLowerCase()
+          target => target && target.name?.toLowerCase() === sourceElement.name?.toLowerCase()
         );
       }
 

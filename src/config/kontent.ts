@@ -1,16 +1,12 @@
-import { KontentService } from '../services/kontentServiceReal';
+import { KontentServiceFixed as KontentService } from '../services/kontentServiceFixed';
 
 // Environment variables para desarrollo
 const KONTENT_PROJECT_ID = import.meta.env.VITE_KONTENT_PROJECT_ID || 'your-project-id';
 const KONTENT_MANAGEMENT_API_KEY = import.meta.env.VITE_KONTENT_MANAGEMENT_API_KEY || 'your-management-api-key';
 const KONTENT_PREVIEW_API_KEY = import.meta.env.VITE_KONTENT_PREVIEW_API_KEY || 'your-preview-api-key';
 
-// Instancia global del servicio
-export const kontentServiceInstance = new KontentService({
-  projectId: KONTENT_PROJECT_ID,
-  managementApiKey: KONTENT_MANAGEMENT_API_KEY,
-  previewApiKey: KONTENT_PREVIEW_API_KEY,
-});
+// Instancia global del servicio (KontentServiceFixed lee las env vars directamente)
+export const kontentServiceInstance = new KontentService();
 
 // Función para verificar la configuración
 export function validateKontentConfiguration(): boolean {

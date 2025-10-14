@@ -191,7 +191,7 @@ export function ContentItemList({
               </div>
             </div>
             <div className="text-sm text-gray-500">
-              {item.lastModified.toLocaleDateString()}
+              {item.lastModified ? item.lastModified.toLocaleDateString() : 'N/A'}
             </div>
           </div>
           ))

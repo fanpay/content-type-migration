@@ -6,7 +6,6 @@ import {
   MigrationItem 
 } from '../types';
 import { MigrationService } from '../services/migrationService';
-import { MigrationServiceReal } from '../services/migrationServiceReal';
 
 export interface UseMigrationResult {
   migrationConfig: MigrationConfig | null;
@@ -24,20 +23,25 @@ export function useMigration(): UseMigrationResult {
   const [isRunning, setIsRunning] = useState(false);
 
   const initializeMigration = useCallback((sourceType: ContentTypeInfo, targetType: ContentTypeInfo) => {
-    const fieldMappings = MigrationServiceReal.generateEnhancedFieldMappings(
-      sourceType.elements,
-      targetType.elements
-    );
+    try {
+      const fieldMappings = MigrationService.generateFieldMappings(
+        sourceType.elements,
+        targetType.elements
+      );
 
-    setMigrationConfig({
-      sourceContentType: sourceType,
-      targetContentType: targetType,
-      fieldMappings,
-      language: 'default', // Default language for now
-    });
+      setMigrationConfig({
+        sourceContentType: sourceType,
+        targetContentType: targetType,
+        fieldMappings,
+        language: 'default', // Default language for now
+      });
 
-    // Reset progress when initializing new migration
-    setProgress(null);
+      // Reset progress when initializing new migration
+      setProgress(null);
+    } catch (error) {
+      console.error('Failed to initialize migration:', error);
+      // Optionally set an error state here
+    }
   }, []);
 
   const updateFieldMapping = useCallback((sourceFieldId: string, targetFieldId: string | null) => {
@@ -50,7 +54,11 @@ export function useMigration(): UseMigrationResult {
           : null;
 
         const validation = targetField 
-          ? MigrationServiceReal.validateFieldCompatibility(mapping.sourceField, targetField)
+          ? { 
+              isCompatible: MigrationService.validateFieldCompatibility(mapping.sourceField.type, targetField.type),
+              warnings: [],
+              canTransform: true 
+            }
           : { isCompatible: false, warnings: ['No target field selected'], canTransform: false };
 
         return {

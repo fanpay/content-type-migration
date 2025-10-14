@@ -1,6 +1,6 @@
 
 import { FieldMapping, ElementInfo, ELEMENT_TYPE_LABELS } from '../types';
-import { MigrationServiceReal } from '../services/migrationServiceReal';
+import { MigrationService } from '../services/migrationService';
 
 interface FieldMappingEditorProps {
   fieldMappings: FieldMapping[];
@@ -13,8 +13,6 @@ export function FieldMappingEditor({
   targetFields,
   onMappingChange,
 }: FieldMappingEditorProps) {
-  // Filter out guidelines fields - they are content type specific and shouldn't be mapped
-  const availableTargetFields = targetFields.filter(field => field.type !== 'guidelines');
   
   const getCompatibilityIcon = (mapping: FieldMapping) => {
     if (!mapping.targetField) {
@@ -99,15 +97,14 @@ export function FieldMappingEditor({
                       className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
                     >
                       <option value="">No mapping</option>
-                      {availableTargetFields.map((field) => {
-                        const validation = MigrationServiceReal.validateFieldCompatibility(
-                          mapping.sourceField,
-                          field
+                      {targetFields.map((targetField) => {
+                        const isCompatible = MigrationService.validateFieldCompatibility(
+                          mapping.sourceField.type,
+                          targetField.type
                         );
-                        const isCompatible = validation.isCompatible;
                         return (
-                          <option key={field.id} value={field.id}>
-                            {field.name} ({ELEMENT_TYPE_LABELS[field.type] || field.type})
+                          <option key={targetField.id} value={targetField.id}>
+                            {targetField.name} ({ELEMENT_TYPE_LABELS[targetField.type] || targetField.type})
                             {isCompatible ? ' ✓' : ' ⚠️'}
                           </option>
                         );
@@ -120,7 +117,7 @@ export function FieldMappingEditor({
                   </td>
                   
                   <td className="px-4 py-3 text-sm text-gray-600">
-                    {MigrationServiceReal.getDetailedTransformationHint(mapping)}
+                    {MigrationService.getFieldTransformationHint(mapping)}
                   </td>
                 </tr>
               ))}
