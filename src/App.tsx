@@ -7,6 +7,7 @@ import { DryRunPreview } from './components/DryRunPreview';
 import { DebugPanel } from './components/DebugPanel';
 import { MigrationResultsModal } from './components/MigrationResultsModal';
 import { ItemRelationshipsViewer } from './components/ItemRelationshipsViewer';
+import { MigrationLogger, LogEntry } from './components/MigrationLogger';
 import { useContentTypes } from './hooks/useKontentData';
 import { useMigration } from './hooks/useMigration';
 import { ContentTypeInfo } from './types';
@@ -24,6 +25,9 @@ export default function App() {
   const [showResults, setShowResults] = useState(false);
   const [updateIncomingReferences, setUpdateIncomingReferences] = useState(false);
   const [itemRelationships, setItemRelationships] = useState<any[]>([]);
+  const [migrationLogs, setMigrationLogs] = useState<LogEntry[]>([]);
+  const [migrationProgress, setMigrationProgress] = useState(0);
+  const [currentMigrationStep, setCurrentMigrationStep] = useState<string>('');
   
   const { contentTypes, isLoading: typesLoading, error: typesError } = useContentTypes();
   const { 
@@ -32,6 +36,16 @@ export default function App() {
     updateFieldMapping, 
     resetMigration 
   } = useMigration();
+
+  // Logger helper function
+  const addLog = useCallback((level: LogEntry['level'], message: string, details?: string) => {
+    setMigrationLogs(prev => [...prev, {
+      timestamp: new Date(),
+      level,
+      message,
+      details
+    }]);
+  }, []);
 
   const handleSourceTypeSelect = (contentType: ContentTypeInfo) => {
     setSourceContentType(contentType);
@@ -91,13 +105,22 @@ export default function App() {
 
     try {
       setMigrationInProgress(true);
-      console.log('🚀 Starting migration...');
+      setMigrationLogs([]);
+      setMigrationProgress(0);
+      
+      addLog('info', '🚀 Starting migration process...');
+      setCurrentMigrationStep('Initializing migration');
       
       const results = [];
+      const totalItems = selectedItems.length;
       
-      for (let i = 0; i < selectedItems.length; i++) {
+      for (let i = 0; i < totalItems; i++) {
         const item = selectedItems[i];
-        console.log(`📝 Migrating item ${i + 1}/${selectedItems.length}: ${item.name}`);
+        const progress = ((i + 1) / totalItems) * 100;
+        setMigrationProgress(progress);
+        setCurrentMigrationStep(`Migrating item ${i + 1} of ${totalItems}: ${item.name}`);
+        
+        addLog('info', `📝 Migrating item ${i + 1}/${totalItems}`, item.name);
         
         try {
           // Transform field mappings to the expected format
@@ -108,51 +131,62 @@ export default function App() {
               targetField: mapping.targetField!.codename,
             }));
 
-          // Call the real migration function
+          addLog('info', `  → Mapping ${mappings.length} fields`);
+
+          // Call the real migration function with logger
           const migrationResult = await kontentServiceFixed.migrateContentItem(
             item,
             mappings,
             migrationConfig.sourceContentType,
             migrationConfig.targetContentType,
-            selectedLanguage
+            selectedLanguage,
+            addLog // Pass the logger function
           );
           
           if (migrationResult.success) {
+            addLog('success', `✅ Successfully migrated "${item.name}"`, 
+              `New item ID: ${migrationResult.newItem?.id || 'unknown'}`);
+            
             results.push({
               sourceItem: item,
               status: 'success',
               newItemId: migrationResult.newItem?.id || 'unknown',
               message: `Successfully migrated "${item.name}" from ${migrationConfig.sourceContentType.name} to ${migrationConfig.targetContentType.name}`,
               timestamp: new Date(),
-              createdItems: migrationResult.createdItems || [], // ← AGREGAR ITEMS CREADOS
+              createdItems: migrationResult.createdItems || [],
             });
           } else {
+            addLog('error', `❌ Failed to migrate "${item.name}"`, migrationResult.error);
+            
             results.push({
               sourceItem: item,
               status: 'error',
               newItemId: null,
               message: `Failed to migrate "${item.name}": ${migrationResult.error}`,
               timestamp: new Date(),
-              createdItems: [], // ← AGREGAR ARRAY VACÍO PARA ERRORES
+              createdItems: [],
             });
           }
           
         } catch (itemError) {
-          console.error(`❌ Failed to migrate item ${item.name}:`, itemError);
+          const errorMsg = itemError instanceof Error ? itemError.message : 'Unknown error';
+          addLog('error', `❌ Failed to migrate item ${item.name}`, errorMsg);
+          
           results.push({
             sourceItem: item,
             status: 'error',
             newItemId: null,
-            message: `Failed to migrate "${item.name}": ${itemError instanceof Error ? itemError.message : 'Unknown error'}`,
+            message: `Failed to migrate "${item.name}": ${errorMsg}`,
             timestamp: new Date(),
-            createdItems: [], // ← AGREGAR ARRAY VACÍO PARA EXCEPCIONES
+            createdItems: [],
           });
         }
       }
       
       // Update incoming references if enabled
       if (updateIncomingReferences && itemRelationships.length > 0) {
-        console.log('🔄 Updating incoming references...');
+        setCurrentMigrationStep('Updating incoming references');
+        addLog('info', '🔄 Updating incoming references...');
         
         for (const relationship of itemRelationships) {
           if (relationship.incomingRelationships.length === 0) continue;
@@ -160,22 +194,21 @@ export default function App() {
           // Find the migration result for this item
           const migrationResult = results.find(r => r.sourceItem.id === relationship.itemId);
           if (!migrationResult || migrationResult.status !== 'success') {
-            console.log(`⚠️ Skipping reference update for ${relationship.itemName} - migration failed or not found`);
+            addLog('warning', `⚠️ Skipping reference update for ${relationship.itemName}`, 
+              'Migration failed or not found');
             continue;
           }
           
           const newItemId = migrationResult.newItemId;
           const oldItemCodename = relationship.itemCodename;
           
-          console.log(`📝 Updating ${relationship.incomingRelationships.length} incoming references for ${relationship.itemName}`);
+          addLog('info', `📝 Updating ${relationship.incomingRelationships.length} incoming references`, 
+            `For item: ${relationship.itemName}`);
           
           for (const incomingRef of relationship.incomingRelationships) {
             try {
-              console.log(`  → Updating ${incomingRef.fromItemName}`);
-              console.log(`     Item codename: ${incomingRef.fromItemCodename}`);
-              console.log(`     Field codename: ${incomingRef.fieldName}`);
-              console.log(`     Old reference: ${oldItemCodename}`);
-              console.log(`     New reference: ${newItemId}`);
+              addLog('info', `  → Updating reference in ${incomingRef.fromItemName}`, 
+                `Field: ${incomingRef.fieldName}`);
               
               // Use the new updateItemReference function
               const updateResult = await kontentServiceFixed.updateItemReference(
@@ -187,24 +220,31 @@ export default function App() {
               );
               
               if (updateResult.success) {
-                console.log(`  ✅ Successfully updated reference in ${incomingRef.fromItemName}`);
+                addLog('success', `  ✅ Successfully updated reference`, 
+                  `In item: ${incomingRef.fromItemName}`);
               } else {
-                console.error(`  ❌ Failed to update reference: ${updateResult.error}`);
+                addLog('error', `  ❌ Failed to update reference`, 
+                  updateResult.error || 'Unknown error');
               }
             } catch (refError) {
-              console.error(`Failed to update reference in ${incomingRef.fromItemName}:`, refError);
+              const errorMsg = refError instanceof Error ? refError.message : 'Unknown error';
+              addLog('error', `Failed to update reference in ${incomingRef.fromItemName}`, errorMsg);
             }
           }
         }
       }
       
+      setMigrationProgress(100);
+      setCurrentMigrationStep('Migration completed');
       setMigrationResults(results);
       setShowResults(true);
-      console.log('✅ Migration completed!', results);
+      addLog('success', '✅ Migration completed successfully!', 
+        `${results.filter(r => r.status === 'success').length} of ${results.length} items migrated`);
       
     } catch (error) {
-      console.error('💥 Migration failed:', error);
-      alert(`Migration failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      addLog('error', '💥 Migration failed', errorMsg);
+      alert(`Migration failed: ${errorMsg}`);
     } finally {
       setMigrationInProgress(false);
     }
@@ -463,6 +503,18 @@ export default function App() {
                 )}
               </div>
             </div>
+            
+            {/* Migration Logger */}
+            {(migrationLogs.length > 0 || migrationInProgress) && (
+              <div className="mb-6">
+                <MigrationLogger
+                  logs={migrationLogs}
+                  progress={migrationProgress}
+                  isRunning={migrationInProgress}
+                  currentStep={currentMigrationStep}
+                />
+              </div>
+            )}
             
             <p className="text-gray-600 mb-6">
               Ready to migrate {selectedItems.length} content item{selectedItems.length !== 1 ? 's' : ''} 

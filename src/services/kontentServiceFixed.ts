@@ -73,15 +73,25 @@ export class KontentServiceFixed {
     fieldMappings: FieldMapping[],
     sourceContentType: any,
     targetContentType: any,
-    sourceLanguage: string = 'en'
+    sourceLanguage: string = 'en',
+    logger?: (level: 'info' | 'success' | 'warning' | 'error', message: string, details?: string) => void
   ): Promise<{ success: boolean; newItem?: any; newVariant?: any; createdItems?: CreatedItemInfo[]; error?: string }> {
     try {
       // Reset the registry for this migration
       this.createdItemsRegistry = [];
       
-      console.log(`🔄 Starting migration for item: ${sourceItem.name}`);
+      const log = (level: 'info' | 'success' | 'warning' | 'error', message: string, details?: string) => {
+        if (logger) {
+          logger(level, message, details);
+        }
+        // Also keep console.log for debugging
+        console.log(message, details || '');
+      };
+      
+      log('info', `🔄 Starting migration for item: ${sourceItem.name}`);
 
       // Step 1: Get source content with complete data using Delivery API
+      log('info', '  → Step 1: Fetching source item data...');
       const sourceItemData = await this.deliveryClient
         .item(sourceItem.codename)
         .depthParameter(1)
@@ -92,22 +102,24 @@ export class KontentServiceFixed {
         throw new Error('Source item not found');
       }
 
-      console.log('📥 Source item elements:', Object.keys(sourceItemData.data.item.elements));
+      log('info', `  → Found ${Object.keys(sourceItemData.data.item.elements).length} source elements`);
 
       // Step 2: Get target content type structure
+      log('info', '  → Step 2: Fetching target content type structure...');
       const targetTypeData = await this.managementClient
         .viewContentType()
         .byTypeCodename(targetContentType.codename)
         .toPromise();
 
-      console.log('🎯 Target type elements:', targetTypeData.data.elements.map((e: any) => e.codename));
+      log('info', `  → Found ${targetTypeData.data.elements.length} target elements`);
 
       // Step 2.1: Use default language ID (most projects use this)
       // For now, use the standard default language ID to avoid API complexity
       const languageId = '00000000-0000-0000-0000-000000000000';
-      console.log('🌐 Using default language ID:', languageId, 'for source language:', sourceLanguage);
+      log('info', `  → Using language: ${sourceLanguage}`);
 
       // Step 3: Create new content item in target content type
+      log('info', '  → Step 3: Creating new content item...');
       const newItem = await this.managementClient
         .addContentItem()
         .withData({
@@ -118,7 +130,7 @@ export class KontentServiceFixed {
         })
         .toPromise();
 
-      console.log('✅ New content item created:', newItem.data.id);
+      log('success', `  ✅ New content item created`, `ID: ${newItem.data.id}`);
 
       // Register the main migrated item
       this.createdItemsRegistry.push({
@@ -134,6 +146,7 @@ export class KontentServiceFixed {
       });
 
       // Step 4: Build elements for language variant based on field mappings
+      log('info', '  → Step 4: Building field mappings...');
       const elements: any[] = [];
       
       for (const mapping of fieldMappings) {
@@ -141,46 +154,36 @@ export class KontentServiceFixed {
           const sourceElement = sourceItemData.data.item.elements[mapping.sourceField];
           const targetElementDef = targetTypeData.data.elements.find((e: any) => e.codename === mapping.targetField);
           
-          console.log(`🔍 Checking mapping: ${mapping.sourceField} -> ${mapping.targetField}`);
-          console.log(`🔍 Source element exists:`, !!sourceElement);
-          console.log(`🔍 Target element exists:`, !!targetElementDef);
-          
-          if (sourceElement) {
-            console.log(`🔍 Source element value:`, sourceElement.value);
-            console.log(`🔍 Source element type:`, typeof sourceElement.value);
-          }
+          log('info', `    • Mapping: ${mapping.sourceField} → ${mapping.targetField}`, 
+            `Source exists: ${!!sourceElement}, Target exists: ${!!targetElementDef}`);
           
           if (sourceElement && targetElementDef) {
-            console.log(`🔄 Mapping ${mapping.sourceField} -> ${mapping.targetField}:`, sourceElement.value);
-            
             const elementData = this.transformFieldValue(sourceElement, targetElementDef, mapping.targetField);
             if (elementData) {
-              console.log(`✅ Element data created:`, elementData);
+              log('success', `      ✅ Mapped successfully`);
               elements.push(elementData);
             } else {
-              console.log(`❌ No element data created for mapping`);
+              log('warning', `      ⚠️ No data created for mapping`);
             }
           } else {
-            console.log(`⚠️ Skipping mapping due to missing source or target element`);
+            log('warning', `      ⚠️ Skipping - missing source or target element`);
           }
         }
       }
 
       // Step 4.5: Add default values for required elements that weren't mapped (except guidelines)
+      log('info', '  → Step 4.5: Adding default values for unmapped fields...');
       for (const targetElement of targetTypeData.data.elements) {
         const isMapped = elements.some(el => el.element.codename === targetElement.codename);
         
-        console.log(`🔍 Checking element: ${targetElement.codename}, required: ${targetElement.is_required}, mapped: ${isMapped}, type: ${targetElement.type}`);
-        
         // Skip guidelines fields - they are specific to each content type
         if (targetElement.type === 'guidelines') {
-          console.log(`⏭️ Skipping guidelines field: ${targetElement.codename}`);
           continue;
         }
         
         // Always add unmapped elements with default values to avoid API errors
         if (!isMapped) {
-          console.log(`➕ Adding default value for unmapped field: ${targetElement.codename} (${targetElement.type})`);
+          log('info', `    • Adding default for: ${targetElement.codename} (${targetElement.type})`);
           
           const defaultElementData = this.getDefaultElementValue(targetElement);
           if (defaultElementData) {
@@ -190,13 +193,11 @@ export class KontentServiceFixed {
       }
 
       // Step 5: Create language variant with field data using direct approach 
-      console.log('📝 Creating language variant with elements:', elements.length, 'elements');
-      console.log('📋 Elements to create:', elements);
+      log('info', `  → Step 5: Creating language variant with ${elements.length} elements...`);
       
       // Prepare elements in the correct format expected by the API
       const elementsData = elements.map(elementData => {
         const { element, value, type } = elementData;
-        console.log(`📝 Preparing element: ${element.codename} (${type}) with value:`, value);
         
         // Return the element in the format expected by the API
         switch (type) {
@@ -229,8 +230,6 @@ export class KontentServiceFixed {
               }).filter(Boolean);
             }
             
-            console.log('🔗 Processed linked items for API:', linkedItemsValue);
-            
             return {
               element: { codename: element.codename },
               value: linkedItemsValue
@@ -251,22 +250,17 @@ export class KontentServiceFixed {
         }
       });
       
-      console.log('🏗️ Final elements data for API:', JSON.stringify(elementsData, null, 2));
-      
-      // Use the correct format based on official documentation
-      console.log('🔧 Creating language variant with proper format...');
-      
       // Pre-process linked items for migration if needed
       let processedElements = [...elementsData];
       
       const linkedElement = elementsData.find(e => e.element.codename === 'parent_page_type_tag');
       if (linkedElement && Array.isArray(linkedElement.value) && linkedElement.value.length > 0) {
-        console.log('🔗 Pre-processing linked items for migration...');
+        log('info', '    • Pre-processing linked items for migration...');
         
         const linkedReferences = [];
         for (const item of linkedElement.value) {
           const codename = item.codename || item;
-          console.log('🔗 Processing linked item:', codename);
+          log('info', `      • Processing linked item: ${codename}`);
           
           // Check if this linked item should also be migrated
           const migratedCodename = await this.handleLinkedItemMigration(
@@ -289,7 +283,7 @@ export class KontentServiceFixed {
           el.element.codename === 'parent_page_type_tag' ? updatedLinkedElement : el
         );
         
-        console.log('🔗 Updated linked references:', linkedReferences);
+        log('success', `    ✅ Updated ${linkedReferences.length} linked references`);
       }
       
       const newVariant = await this.managementClient
@@ -297,8 +291,6 @@ export class KontentServiceFixed {
         .byItemId(newItem.data.id)
         .byLanguageId(languageId)
         .withData((builder: any) => {
-          console.log('🏗️ Building elements with correct format...');
-          
           const elements = [];
           
           // Add name element
@@ -313,15 +305,11 @@ export class KontentServiceFixed {
           // Add linked items element if it has values
           const processedLinkedElement = processedElements.find(e => e.element.codename === 'parent_page_type_tag');
           if (processedLinkedElement && Array.isArray(processedLinkedElement.value) && processedLinkedElement.value.length > 0) {
-            console.log('🔗 Adding processed linked items element:', processedLinkedElement.value);
-            
             elements.push(builder.linkedItemsElement({
               element: { codename: 'parent_page_type_tag' },
               value: processedLinkedElement.value
             }));
           }
-          
-          console.log('✅ Final elements built:', elements.length);
           
           // Return in the format expected by the API: {elements: [...]}
           return {
@@ -330,10 +318,13 @@ export class KontentServiceFixed {
         })
         .toPromise();
 
-      console.log('✅ Migration completed successfully with field data');
+      log('success', `✅ Migration completed successfully for: ${sourceItem.name}`);
 
       // Log the summary of created items
-      console.log(this.getCreatedItemsSummary());
+      const summary = this.getCreatedItemsSummary();
+      if (summary) {
+        log('info', 'Migration summary:', summary);
+      }
 
       return {
         success: true,
@@ -343,7 +334,10 @@ export class KontentServiceFixed {
       };
 
     } catch (error: any) {
-      console.error(`❌ Migration failed for ${sourceItem.name}:`, error);
+      if (logger) {
+        logger('error', `Migration failed for ${sourceItem.name}`, error.message);
+      }
+      console.error('❌ Migration failed for', sourceItem.name, ':', error);
       console.error('❌ Error details:', {
         message: error.message,
         validationErrors: error.validationErrors,
