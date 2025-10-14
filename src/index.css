@@ -1,0 +1,117 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background-color: #fafafa;
+  color: #1a1a1a;
+}
+
+#root {
+  width: 100%;
+  margin: 0;
+  min-height: 100vh;
+}
+
+h1 {
+  font-size: 3.2em;
+  line-height: 1.1;
+}
+
+button {
+  border-radius: 8px;
+  border: 1px solid transparent;
+  padding: 0.6em 1.2em;
+  font-size: 1em;
+  font-weight: 500;
+  font-family: inherit;
+  background-color: #1a1a1a;
+  color: white;
+  cursor: pointer;
+  transition: border-color 0.25s;
+}
+button:hover {
+  border-color: #646cff;
+}
+button:focus,
+button:focus-visible {
+  outline: 4px auto -webkit-focus-ring-color;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color: #213547;
+    background-color: #ffffff;
+  }
+  a:hover {
+    color: #747bff;
+  }
+  button {
+    background-color: #f9f9f9;
+    color: #213547;
+  }
+}
+
+/* Custom styles for the migration app */
+.compatibility-indicator {
+  @apply inline-flex items-center justify-center w-6 h-6 rounded-full text-sm font-medium;
+}
+
+.compatibility-indicator.compatible {
+  @apply bg-green-100 text-green-800;
+}
+
+.compatibility-indicator.incompatible {
+  @apply bg-red-100 text-red-800;
+}
+
+.compatibility-indicator.unmapped {
+  @apply bg-gray-100 text-gray-500;
+}
+
+.field-mapping-row {
+  @apply transition-colors duration-150 ease-in-out;
+}
+
+.field-mapping-row:hover {
+  @apply bg-gray-50;
+}
+
+.step-indicator {
+  @apply flex items-center space-x-2;
+}
+
+.step-indicator.active {
+  @apply text-blue-600;
+}
+
+.step-indicator.inactive {
+  @apply text-gray-400;
+}
+
+.step-number {
+  @apply w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium;
+}
+
+.step-number.active {
+  @apply bg-blue-600 text-white;
+}
+
+.step-number.inactive {
+  @apply bg-gray-200 text-gray-600;
+}

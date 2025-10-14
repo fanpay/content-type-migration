@@ -1,0 +1,28 @@
+{
+  "name": "Content Type Migration",
+  "description": "Migrate content items between different content types with intelligent field mapping and compatibility validation",
+  "version": "1.0.0",
+  "url": "https://localhost:3001/",
+  "callback": "https://localhost:3001/callback",
+  "permissions": [
+    "content_item:read",
+    "content_item:write",
+    "content_type:read",
+    "language:read"
+  ],
+  "author": {
+    "name": "Felipe Payan",
+    "email": "felipe.payan@example.com"
+  },
+  "categories": ["Content Management", "Migration Tools"],
+  "screenshots": [
+    "https://localhost:3001/screenshots/step1.png",
+    "https://localhost:3001/screenshots/step2.png",
+    "https://localhost:3001/screenshots/step3.png"
+  ],
+  "supportedLanguages": ["en", "es"],
+  "icon": {
+    "url": "https://localhost:3001/icon.png",
+    "size": "256x256"
+  }
+}
