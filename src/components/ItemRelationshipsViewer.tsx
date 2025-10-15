@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { createDeliveryClient } from '@kontent-ai/delivery-sdk';
 
 interface RelationshipInfo {
   fieldName: string;
@@ -52,15 +51,6 @@ export function ItemRelationshipsViewer({
       setLoading(true);
       const itemRelationships: ItemRelationship[] = [];
 
-      // Initialize Delivery Client
-      const deliveryClient = createDeliveryClient({
-        environmentId: import.meta.env.VITE_KONTENT_PROJECT_ID,
-        previewApiKey: import.meta.env.VITE_KONTENT_PREVIEW_API_KEY,
-        defaultQueryConfig: {
-          usePreviewMode: true,
-        },
-      });
-
       for (const item of selectedItems) {
         try {
           // Get outgoing relationships (items this item points to)
@@ -107,18 +97,30 @@ export function ItemRelationshipsViewer({
             }
           });
 
-          // Use SDK's itemUsedIn() method to find incoming relationships
-          // NOTE: itemUsedIn doesn't support language parameter - it returns all items across all languages
-          // We'll filter by language when fetching the item details
+          // Use Delivery API's itemUsedIn endpoint with language filter
+          // IMPORTANT: Use system.language[in] parameter to filter by language
           try {
-            console.log(`🔍 Searching for items using: ${item.codename} (across all languages)`);
-            const usedInResponse = await deliveryClient
-              .itemUsedIn(item.codename)
-              .toAllPromise();
+            console.log(`🔍 Searching for items using: ${item.codename} in language: ${selectedLanguage}`);
+            
+            // Use fetch instead of SDK to support system.language[in] filter
+            const usedInUrl = `https://deliver.kontent.ai/${import.meta.env.VITE_KONTENT_PROJECT_ID}/items/${item.codename}/used-in?system.language[in]=${selectedLanguage}`;
+            const usedInResponse = await fetch(usedInUrl, {
+              headers: {
+                'Authorization': `Bearer ${import.meta.env.VITE_KONTENT_PREVIEW_API_KEY}`,
+                'Accept': 'application/json',
+              },
+            });
 
-            console.log(`✅ Found ${usedInResponse.data.items.length} items using ${item.codename} (will filter by language: ${selectedLanguage})`);
+            if (!usedInResponse.ok) {
+              throw new Error(`Failed to fetch used-in: ${usedInResponse.status}`);
+            }
 
-            for (const usedInItem of usedInResponse.data.items) {
+            const usedInData = await usedInResponse.json();
+            const usedInItems = usedInData.items || [];
+
+            console.log(`✅ Found ${usedInItems.length} items using ${item.codename} in ${selectedLanguage}`);
+
+            for (const usedInItem of usedInItems) {
               // Fetch the item details to get element information
               // IMPORTANT: Include language parameter to get the correct variant
               // This will only return the item if it exists in the selected language
