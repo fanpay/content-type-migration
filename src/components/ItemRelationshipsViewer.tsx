@@ -108,19 +108,20 @@ export function ItemRelationshipsViewer({
           });
 
           // Use SDK's itemUsedIn() method to find incoming relationships
-          // IMPORTANT: Search in the selected language
+          // NOTE: itemUsedIn doesn't support language parameter - it returns all items across all languages
+          // We'll filter by language when fetching the item details
           try {
-            console.log(`🔍 Searching for items using: ${item.codename} in language: ${selectedLanguage}`);
+            console.log(`🔍 Searching for items using: ${item.codename} (across all languages)`);
             const usedInResponse = await deliveryClient
               .itemUsedIn(item.codename)
-              .languageParameter(selectedLanguage)
               .toAllPromise();
 
-            console.log(`✅ Found ${usedInResponse.data.items.length} items using ${item.codename} in ${selectedLanguage}`);
+            console.log(`✅ Found ${usedInResponse.data.items.length} items using ${item.codename} (will filter by language: ${selectedLanguage})`);
 
             for (const usedInItem of usedInResponse.data.items) {
               // Fetch the item details to get element information
               // IMPORTANT: Include language parameter to get the correct variant
+              // This will only return the item if it exists in the selected language
               try {
                 const detailResponse = await fetch(
                   `https://deliver.kontent.ai/${import.meta.env.VITE_KONTENT_PROJECT_ID}/items/${usedInItem.system.codename}?depth=0&language=${selectedLanguage}`,
@@ -133,6 +134,12 @@ export function ItemRelationshipsViewer({
 
                 if (detailResponse.ok) {
                   const detailData = await detailResponse.json();
+                  
+                  // Verify the item is actually in the requested language
+                  if (detailData.item.system.language !== selectedLanguage) {
+                    console.log(`⏭️ Skipping ${usedInItem.system.codename} - not in language ${selectedLanguage}`);
+                    continue;
+                  }
                   
                   // Find which field contains the reference
                   Object.entries(detailData.item.elements || {}).forEach(([elementCodename, element]: [string, any]) => {
@@ -148,6 +155,8 @@ export function ItemRelationshipsViewer({
                       }
                     }
                   });
+                } else if (detailResponse.status === 404) {
+                  console.log(`⏭️ Item ${usedInItem.system.codename} doesn't exist in language ${selectedLanguage}`);
                 }
               } catch (detailError) {
                 console.log(`Could not fetch details for ${usedInItem.system.codename}:`, detailError);
