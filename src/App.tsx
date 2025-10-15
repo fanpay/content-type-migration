@@ -213,12 +213,28 @@ export default function App() {
           const newItemId = migrationResult.newItemId;
           const oldItemCodename = relationship.itemCodename;
           
-          addLog('info', `📝 Updating ${relationship.incomingRelationships.length} incoming references`, 
+          // IMPORTANT: Filter out incoming references from items of the SAME SOURCE TYPE
+          // We only want to update references in items of the TARGET TYPE or other different types
+          const sourceTypeCodename = migrationConfig?.sourceContentType.codename;
+          const filteredIncomingRefs = relationship.incomingRelationships.filter((ref: any) => {
+            const isSameSourceType = ref.fromItemType === sourceTypeCodename;
+            if (isSameSourceType) {
+              addLog('info', `  ⏭️ Skipping reference from ${ref.fromItemName} (same source type: ${sourceTypeCodename})`);
+            }
+            return !isSameSourceType;
+          });
+          
+          if (filteredIncomingRefs.length === 0) {
+            addLog('info', `⏭️ No references to update for ${relationship.itemName} (all were from source type)`);
+            continue;
+          }
+          
+          addLog('info', `📝 Updating ${filteredIncomingRefs.length} incoming references (filtered from ${relationship.incomingRelationships.length} total)`, 
             `For item: ${relationship.itemName}`);
           
-          for (const incomingRef of relationship.incomingRelationships) {
+          for (const incomingRef of filteredIncomingRefs) {
             try {
-              addLog('info', `  → Updating reference in ${incomingRef.fromItemName}`, 
+              addLog('info', `  → Updating reference in ${incomingRef.fromItemName} [${incomingRef.fromItemType}]`, 
                 `Field: ${incomingRef.fieldName}`);
               
               // Use the new updateItemReference function

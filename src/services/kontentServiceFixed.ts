@@ -244,32 +244,106 @@ export class KontentServiceFixed {
       const languageId = await this.getLanguageId(sourceLanguage);
       log('info', `  → Using language: ${sourceLanguage} (ID: ${languageId})`);
 
-      // Step 3: Create new content item in target content type
-      log('info', '  → Step 3: Creating new content item...');
-      const newItem = await this.managementClient
-        .addContentItem()
-        .withData({
-          name: `${sourceItem.name}`,
-          type: {
-            codename: targetContentType.codename,
-          },
-        })
-        .toPromise();
+      // Step 3: Generate migrated codename and check if item already exists
+      const migratedCodename = `${sourceItem.codename}_migrated`;
+      log('info', `  → Step 3: Checking if migrated item already exists: ${migratedCodename}...`);
+      
+      let newItem: any;
+      let itemAlreadyExisted = false;
+      let shouldCreateVariant = true;
+      
+      try {
+        // Check if migrated item already exists in Management API
+        const existingItem = await this.managementClient
+          .viewContentItem()
+          .byItemCodename(migratedCodename)
+          .toPromise();
+        
+        log('info', `  → Migrated item already exists: ${migratedCodename}`);
+        newItem = existingItem;
+        itemAlreadyExisted = true;
+        
+        // Check if the language variant already exists for this item
+        try {
+          await this.managementClient
+            .viewLanguageVariant()
+            .byItemCodename(migratedCodename)
+            .byLanguageId(languageId)
+            .toPromise();
+          
+          log('warning', `  ⚠️ Language variant already exists for ${migratedCodename} in ${sourceLanguage}. Skipping...`);
+          shouldCreateVariant = false;
+          
+          // Register that this item and variant already existed
+          this.createdItemsRegistry.push({
+            originalCodename: sourceItem.codename,
+            originalName: sourceItem.name,
+            originalType: sourceContentType.codename,
+            newCodename: migratedCodename,
+            newName: existingItem.data.name,
+            newType: targetContentType.codename,
+            newId: existingItem.data.id,
+            wasAutoMigrated: false,
+            alreadyExisted: true,
+          });
+          
+          return {
+            success: true,
+            newItem: existingItem.data,
+            newVariant: null,
+            createdItems: this.createdItemsRegistry,
+          };
+        } catch (variantError: any) {
+          // Variant doesn't exist, we should create it
+          log('info', `  → Language variant doesn't exist yet for ${sourceLanguage}. Will create it...`);
+          shouldCreateVariant = true;
+        }
+      } catch (notFoundError: any) {
+        // Item doesn't exist, create it
+        log('info', `  → Creating new content item: ${migratedCodename}...`);
+        newItem = await this.managementClient
+          .addContentItem()
+          .withData({
+            name: `${sourceItem.name}`,
+            codename: migratedCodename,
+            type: {
+              codename: targetContentType.codename,
+            },
+          })
+          .toPromise();
 
-      log('success', `  ✅ New content item created`, `ID: ${newItem.data.id}`);
+        log('success', `  ✅ New content item created`, `ID: ${newItem.data.id}`);
+      }
 
       // Register the main migrated item
       this.createdItemsRegistry.push({
         originalCodename: sourceItem.codename,
         originalName: sourceItem.name,
         originalType: sourceContentType.codename,
-        newCodename: newItem.data.codename,
+        newCodename: itemAlreadyExisted ? migratedCodename : newItem.data.codename,
         newName: newItem.data.name,
         newType: targetContentType.codename,
         newId: newItem.data.id,
         wasAutoMigrated: false, // This is the main item, not auto-migrated
-        alreadyExisted: false,  // This is a new item
+        alreadyExisted: itemAlreadyExisted && !shouldCreateVariant,  // True only if item AND variant existed
       });
+      
+      // Only proceed with variant creation if it should be created
+      if (!shouldCreateVariant) {
+        log('info', '  → Skipping variant creation (already exists)...');
+        
+        const summary = this.getCreatedItemsSummary();
+        if (summary) {
+          log('info', 'Migration summary:', summary);
+        }
+        
+        return {
+          success: true,
+          newItem: newItem.data,
+          newVariant: null,
+          createdItems: this.createdItemsRegistry,
+        };
+      }
 
       // Step 4: Build elements for language variant based on field mappings
       log('info', '  → Step 4: Building field mappings...');
@@ -599,33 +673,60 @@ export class KontentServiceFixed {
         
         // Generate a shorter, cleaner codename for the migrated item
         const migratedCodename = `${referencedCodename}_migrated`;
+        const languageId = await this.getLanguageId(sourceLanguage);
+        
+        // Step 4: Check if migrated version already exists
+        console.log(`🔍 Checking if ${migratedCodename} already exists...`);
+        let newMigratedItem: any;
+        let itemAlreadyExisted = false;
+        let shouldCreateVariant = true;
         
         try {
-          // Step 4: Check if migrated version already exists
-          console.log(`🔍 Checking if ${migratedCodename} already exists...`);
-          const existingItem = await this.deliveryClient!.item(migratedCodename).toPromise();
+          // Check in Management API if item exists
+          const existingItem = await this.managementClient
+            .viewContentItem()
+            .byItemCodename(migratedCodename)
+            .toPromise();
+          
           console.log(`✅ Migrated version already exists: ${migratedCodename}`);
+          newMigratedItem = existingItem;
+          itemAlreadyExisted = true;
           
-          // Register that this item already existed
-          this.createdItemsRegistry.push({
-            originalCodename: referencedCodename,
-            originalName: referencedItem.data.item.system.name,
-            originalType: sourceContentType.codename,
-            newCodename: migratedCodename,
-            newName: existingItem.data.item.system.name,
-            newType: targetContentType.codename,
-            newId: existingItem.data.item.system.id,
-            wasAutoMigrated: true,
-            alreadyExisted: true, // ← Item already existed, skipped creation
-          });
-          
-          return migratedCodename;
+          // Check if the language variant already exists for this item
+          try {
+            await this.managementClient
+              .viewLanguageVariant()
+              .byItemCodename(migratedCodename)
+              .byLanguageId(languageId)
+              .toPromise();
+            
+            console.log(`⚠️ Language variant already exists for ${migratedCodename} in ${sourceLanguage}. Skipping variant creation...`);
+            shouldCreateVariant = false;
+            
+            // Register that this item and variant already existed
+            this.createdItemsRegistry.push({
+              originalCodename: referencedCodename,
+              originalName: referencedItem.data.item.system.name,
+              originalType: sourceContentType.codename,
+              newCodename: migratedCodename,
+              newName: existingItem.data.name,
+              newType: targetContentType.codename,
+              newId: existingItem.data.id,
+              wasAutoMigrated: true,
+              alreadyExisted: true,
+            });
+            
+            return migratedCodename;
+          } catch (variantError: any) {
+            // Variant doesn't exist, we should create it
+            console.log(`→ Language variant doesn't exist yet for ${sourceLanguage}. Will create it...`);
+          }
         } catch (notFoundError: unknown) {
           // Migrated version doesn't exist, create it
           console.log(`🔨 Creating new migrated item: ${migratedCodename}`, notFoundError instanceof Error ? notFoundError.message : 'Item not found');
           
           // Step 5: Create the new migrated content item
-          const newMigratedItem = await this.managementClient
+          newMigratedItem = await this.managementClient
             .addContentItem()
             .withData({
               name: `${referencedItem.data.item.system.name}`,
@@ -637,11 +738,11 @@ export class KontentServiceFixed {
             .toPromise();
 
           console.log(`✅ Created migrated item: ${newMigratedItem.data.id}`);
-          
-          // Step 6: Create language variant with migrated field data
-          const languageId = await this.getLanguageId(sourceLanguage);
-          console.log(`🌐 Using language "${sourceLanguage}" (ID: ${languageId}) for linked item migration`);
-          
+          itemAlreadyExisted = false;
+        }
+        
+        // Only create variant if it doesn't already exist
+        if (shouldCreateVariant) {
           console.log(`🔧 Creating language variant for migrated item...`);
           
           // Pre-process parent references recursively BEFORE creating the variant
@@ -702,12 +803,12 @@ export class KontentServiceFixed {
             newName: newMigratedItem.data.name,
             newType: targetContentType.codename,
             newId: newMigratedItem.data.id,
-            wasAutoMigrated: true, // This item was auto-migrated during recursive linked item migration
-            alreadyExisted: false, // ← This is a newly created item
+            wasAutoMigrated: true,
+            alreadyExisted: itemAlreadyExisted,
           });
-          
-          return migratedCodename;
         }
+        
+        return migratedCodename;
       } else {
         console.log(`⏭️ Referenced item ${referencedCodename} is of different type, no migration needed`);
         return referencedCodename;
