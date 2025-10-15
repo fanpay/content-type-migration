@@ -500,6 +500,7 @@ export default function App() {
           <div className="bg-white rounded-lg shadow-md p-6">
             <ItemRelationshipsViewer
               selectedItems={selectedItems}
+              selectedLanguage={selectedLanguage}
               onContinue={handleContinueToMigration}
               onBack={handleBackToItemSelection}
             />

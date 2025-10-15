@@ -31,12 +31,14 @@ interface ItemRelationship {
 
 interface ItemRelationshipsViewerProps {
   selectedItems: any[];
+  selectedLanguage: string;
   onContinue: (data: { updateIncomingReferences: boolean; relationships: ItemRelationship[] }) => void;
   onBack: () => void;
 }
 
 export function ItemRelationshipsViewer({
   selectedItems,
+  selectedLanguage,
   onContinue,
   onBack,
 }: Readonly<ItemRelationshipsViewerProps>) {
@@ -62,8 +64,9 @@ export function ItemRelationshipsViewer({
       for (const item of selectedItems) {
         try {
           // Get outgoing relationships (items this item points to)
+          // IMPORTANT: Include language parameter to get the correct variant
           const response = await fetch(
-            `https://deliver.kontent.ai/${import.meta.env.VITE_KONTENT_PROJECT_ID}/items/${item.codename}?depth=1`,
+            `https://deliver.kontent.ai/${import.meta.env.VITE_KONTENT_PROJECT_ID}/items/${item.codename}?depth=1&language=${selectedLanguage}`,
             {
               headers: {
                 'Authorization': `Bearer ${import.meta.env.VITE_KONTENT_PREVIEW_API_KEY}`,
@@ -105,19 +108,22 @@ export function ItemRelationshipsViewer({
           });
 
           // Use SDK's itemUsedIn() method to find incoming relationships
+          // IMPORTANT: Search in the selected language
           try {
-            console.log(`🔍 Searching for items using: ${item.codename}`);
+            console.log(`🔍 Searching for items using: ${item.codename} in language: ${selectedLanguage}`);
             const usedInResponse = await deliveryClient
               .itemUsedIn(item.codename)
+              .languageParameter(selectedLanguage)
               .toAllPromise();
 
-            console.log(`✅ Found ${usedInResponse.data.items.length} items using ${item.codename}`);
+            console.log(`✅ Found ${usedInResponse.data.items.length} items using ${item.codename} in ${selectedLanguage}`);
 
             for (const usedInItem of usedInResponse.data.items) {
               // Fetch the item details to get element information
+              // IMPORTANT: Include language parameter to get the correct variant
               try {
                 const detailResponse = await fetch(
-                  `https://deliver.kontent.ai/${import.meta.env.VITE_KONTENT_PROJECT_ID}/items/${usedInItem.system.codename}?depth=0`,
+                  `https://deliver.kontent.ai/${import.meta.env.VITE_KONTENT_PROJECT_ID}/items/${usedInItem.system.codename}?depth=0&language=${selectedLanguage}`,
                   {
                     headers: {
                       'Authorization': `Bearer ${import.meta.env.VITE_KONTENT_PREVIEW_API_KEY}`,
@@ -173,7 +179,7 @@ export function ItemRelationshipsViewer({
     }
 
     loadRelationships();
-  }, [selectedItems]);
+  }, [selectedItems, selectedLanguage]); // Re-run when items or language changes
 
   const toggleExpanded = (itemId: string) => {
     const newExpanded = new Set(expandedItems);
