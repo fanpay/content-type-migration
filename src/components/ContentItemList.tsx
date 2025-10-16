@@ -211,15 +211,6 @@ export function ContentItemList({
             <p className="text-sm text-blue-800">
               <strong>{selectedCount}</strong> content item{selectedCount !== 1 ? 's' : ''} selected for migration (Language: <strong>{language}</strong>).
             </p>
-            <button
-              onClick={() => {
-                const selected = items.filter(item => selectedItems.has(item.id));
-                onItemsSelected(selected);
-              }}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
-            >
-              Continue with {selectedCount} item{selectedCount !== 1 ? 's' : ''} →
-            </button>
           </div>
         </div>
       )}

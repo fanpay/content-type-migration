@@ -524,6 +524,7 @@ export default function App() {
               <div className="text-sm text-blue-800 space-y-1">
                 <div>Source: {sourceContentType?.name}</div>
                 <div>Target: {targetContentType?.name}</div>
+                <div>Selected Language: {selectedLanguage}</div>
                 <div>Items to migrate: {selectedItems.length}</div>
                 <div>Mapped fields: {migrationConfig?.fieldMappings.filter(m => m.targetField).length}</div>
                 {updateIncomingReferences && (
