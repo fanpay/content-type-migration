@@ -14,6 +14,30 @@ import { useMigration } from './hooks/useMigration';
 import { ContentTypeInfo } from './types';
 import { kontentServiceFixed } from './services/kontentServiceFixed';
 
+// Helper function to get language flag
+const getLanguageFlag = (languageCode: string): string => {
+  const languageFlags: Record<string, string> = {
+    'en': '🇬🇧',
+    'de': '🇩🇪',
+    'es': '🇪🇸',
+    'zh': '🇨🇳'
+  };
+  return languageFlags[languageCode] || '🌐';
+};
+
+// Helper function to download file
+const downloadFile = (content: string, filename: string, contentType: string) => {
+  const blob = new Blob([content], { type: contentType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+};
+
 export default function App() {
   const [step, setStep] = useState(1);
   const [sourceContentType, setSourceContentType] = useState<ContentTypeInfo | undefined>();
@@ -99,6 +123,215 @@ export default function App() {
 
   const handleBackToRelationships = () => {
     setStep(4);
+  };
+
+  // Generate detailed migration report in JSON format
+  const generateJSONReport = () => {
+    const report = {
+      migrationSummary: {
+        timestamp: new Date().toISOString(),
+        sourceContentType: sourceContentType?.name || 'Unknown',
+        sourceContentTypeCodename: sourceContentType?.codename || 'unknown',
+        targetContentType: targetContentType?.name || 'Unknown',
+        targetContentTypeCodename: targetContentType?.codename || 'unknown',
+        language: selectedLanguage,
+        languageFlag: getLanguageFlag(selectedLanguage),
+        totalItemsProcessed: migrationResults.length,
+        successfulMigrations: migrationResults.filter(r => r.status === 'success').length,
+        failedMigrations: migrationResults.filter(r => r.status === 'error').length,
+        updateIncomingReferences: updateIncomingReferences,
+        totalIncomingReferencesUpdated: updateIncomingReferences && Array.isArray(itemRelationships)
+          ? itemRelationships.reduce((sum, rel) => {
+              return sum + (Array.isArray(rel.incomingRelationships) ? rel.incomingRelationships.length : 0);
+            }, 0)
+          : 0,
+      },
+      fieldMappings: migrationConfig?.fieldMappings.filter(m => m.targetField).map(m => ({
+        sourceField: m.sourceField.name,
+        sourceFieldCodename: m.sourceField.codename,
+        sourceFieldType: m.sourceField.type,
+        targetField: m.targetField?.name || 'N/A',
+        targetFieldCodename: m.targetField?.codename || 'N/A',
+        targetFieldType: m.targetField?.type || 'N/A',
+        transformationNeeded: m.transformationNeeded,
+        warnings: Array.isArray(m.warnings) ? m.warnings : [],
+      })),
+      migratedItems: migrationResults.map(result => ({
+        sourceItem: {
+          id: result.sourceItem.id,
+          name: result.sourceItem.name,
+          codename: result.sourceItem.codename,
+        },
+        status: result.status,
+        newItemId: result.newItemId,
+        message: result.message,
+        timestamp: result.timestamp.toISOString(),
+        createdItems: result.createdItems?.map((item: any) => ({
+          originalCodename: item.originalCodename,
+          originalName: item.originalName,
+          originalType: item.originalType,
+          newCodename: item.newCodename,
+          newName: item.newName,
+          newType: item.newType,
+          newId: item.newId,
+          wasAutoMigrated: item.wasAutoMigrated,
+          alreadyExisted: item.alreadyExisted,
+        })) || [],
+      })),
+      relationships: updateIncomingReferences && Array.isArray(itemRelationships) ? itemRelationships.map(rel => ({
+        itemId: rel.itemId,
+        itemName: rel.itemName,
+        itemCodename: rel.itemCodename,
+        incomingReferences: Array.isArray(rel.incomingRelationships) ? rel.incomingRelationships.map((ref: any) => ({
+          fromItemName: ref.fromItemName,
+          fromItemCodename: ref.fromItemCodename,
+          fromItemType: ref.fromItemType,
+          fieldName: ref.fieldName,
+        })) : [],
+      })) : [],
+      logs: migrationLogs.map(log => ({
+        timestamp: log.timestamp.toISOString(),
+        level: log.level,
+        message: log.message,
+        details: log.details,
+      })),
+    };
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+    const filename = `migration-report-${timestamp}.json`;
+    downloadFile(JSON.stringify(report, null, 2), filename, 'application/json');
+  };
+
+  // Generate human-readable migration report in text format
+  const generateTextReport = () => {
+    const successCount = migrationResults.filter(r => r.status === 'success').length;
+    const errorCount = migrationResults.filter(r => r.status === 'error').length;
+    
+    let report = '';
+    report += '═══════════════════════════════════════════════════════════\n';
+    report += '           KONTENT.AI CONTENT TYPE MIGRATION REPORT\n';
+    report += '═══════════════════════════════════════════════════════════\n\n';
+    
+    report += `📅 Date: ${new Date().toLocaleString()}\n`;
+    report += `${getLanguageFlag(selectedLanguage)} Language: ${selectedLanguage.toUpperCase()}\n\n`;
+    
+    report += '───────────────────────────────────────────────────────────\n';
+    report += ' MIGRATION SUMMARY\n';
+    report += '───────────────────────────────────────────────────────────\n';
+    report += `Source Content Type: ${sourceContentType?.name} (${sourceContentType?.codename})\n`;
+    report += `Target Content Type: ${targetContentType?.name} (${targetContentType?.codename})\n`;
+    report += `Total Items Processed: ${migrationResults.length}\n`;
+    report += `✅ Successful: ${successCount}\n`;
+    report += `❌ Failed: ${errorCount}\n`;
+    report += `Update Incoming References: ${updateIncomingReferences ? 'Yes' : 'No'}\n`;
+    
+    if (updateIncomingReferences && Array.isArray(itemRelationships)) {
+      const totalRefs = itemRelationships.reduce((sum, rel) => {
+        return sum + (Array.isArray(rel.incomingRelationships) ? rel.incomingRelationships.length : 0);
+      }, 0);
+      report += `Total Incoming References: ${totalRefs}\n`;
+    }
+    
+    report += '\n───────────────────────────────────────────────────────────\n';
+    report += ' FIELD MAPPINGS\n';
+    report += '───────────────────────────────────────────────────────────\n';
+    migrationConfig?.fieldMappings.filter(m => m.targetField).forEach(m => {
+      report += `• ${m.sourceField.name} (${m.sourceField.type}) → ${m.targetField?.name} (${m.targetField?.type})\n`;
+      if (m.transformationNeeded) {
+        report += `  ⚠️ Transformation needed\n`;
+      }
+      if (m.warnings && Array.isArray(m.warnings) && m.warnings.length > 0) {
+        m.warnings.forEach(w => report += `  ⚠️ ${w}\n`);
+      }
+    });
+    
+    report += '\n───────────────────────────────────────────────────────────\n';
+    report += ' MIGRATED ITEMS DETAILS\n';
+    report += '───────────────────────────────────────────────────────────\n\n';
+    
+    migrationResults.forEach((result, index) => {
+      report += `${index + 1}. ${result.sourceItem.name}\n`;
+      report += `   Codename: ${result.sourceItem.codename}\n`;
+      report += `   Status: ${result.status === 'success' ? '✅ SUCCESS' : '❌ FAILED'}\n`;
+      report += `   Message: ${result.message}\n`;
+      if (result.newItemId) {
+        report += `   New Item ID: ${result.newItemId}\n`;
+      }
+      report += `   Completed: ${result.timestamp.toLocaleString()}\n`;
+      
+      if (result.createdItems && result.createdItems.length > 0) {
+        report += `\n   📋 Created Items (${result.createdItems.length} total):\n`;
+        
+        // Main items
+        const mainItems = result.createdItems.filter((item: any) => !item.wasAutoMigrated);
+        if (mainItems.length > 0) {
+          report += `\n   🎯 Main Item:\n`;
+          mainItems.forEach((item: any) => {
+            report += `      • ${item.newName}\n`;
+            report += `        Original: [${item.originalType}] ${item.originalCodename}\n`;
+            report += `        New: [${item.newType}] ${item.newCodename}\n`;
+            report += `        ID: ${item.newId}\n`;
+            if (item.alreadyExisted) {
+              report += `        ⚠️ Status: Already existed (skipped)\n`;
+            }
+          });
+        }
+        
+        // Auto-migrated items
+        const autoItems = result.createdItems.filter((item: any) => item.wasAutoMigrated);
+        if (autoItems.length > 0) {
+          report += `\n   🔗 Auto-Migrated Linked Items (${autoItems.length}):\n`;
+          autoItems.forEach((item: any) => {
+            report += `      • ${item.newName}\n`;
+            report += `        Original: [${item.originalType}] ${item.originalCodename}\n`;
+            report += `        New: [${item.newType}] ${item.newCodename}\n`;
+            report += `        ID: ${item.newId}\n`;
+            if (item.alreadyExisted) {
+              report += `        ⚠️ Status: Already existed (skipped)\n`;
+            }
+          });
+        }
+      }
+      report += '\n';
+    });
+    
+    if (updateIncomingReferences && Array.isArray(itemRelationships) && itemRelationships.length > 0) {
+      report += '───────────────────────────────────────────────────────────\n';
+      report += ' INCOMING REFERENCES UPDATED\n';
+      report += '───────────────────────────────────────────────────────────\n\n';
+      
+      itemRelationships.forEach(rel => {
+        if (rel.incomingRelationships && Array.isArray(rel.incomingRelationships) && rel.incomingRelationships.length > 0) {
+          report += `Item: ${rel.itemName} (${rel.itemCodename})\n`;
+          report += `References updated: ${rel.incomingRelationships.length}\n`;
+          rel.incomingRelationships.forEach((ref: any) => {
+            report += `  • From: ${ref.fromItemName} [${ref.fromItemType}]\n`;
+            report += `    Field: ${ref.fieldName}\n`;
+          });
+          report += '\n';
+        }
+      });
+    }
+    
+    report += '───────────────────────────────────────────────────────────\n';
+    report += ' MIGRATION LOGS\n';
+    report += '───────────────────────────────────────────────────────────\n\n';
+    
+    migrationLogs.forEach(log => {
+      const level = log.level === 'success' ? '✅' : log.level === 'error' ? '❌' : log.level === 'warning' ? '⚠️' : 'ℹ️';
+      report += `[${log.timestamp.toLocaleTimeString()}] ${level} ${log.message}\n`;
+      if (log.details) {
+        report += `   ${log.details}\n`;
+      }
+    });
+    
+    report += '\n═══════════════════════════════════════════════════════════\n';
+    report += '                    END OF REPORT\n';
+    report += '═══════════════════════════════════════════════════════════\n';
+    
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+    const filename = `migration-report-${timestamp}.txt`;
+    downloadFile(report, filename, 'text/plain');
   };
 
   const handleExecuteMigration = async () => {
@@ -524,7 +757,7 @@ export default function App() {
               <div className="text-sm text-blue-800 space-y-1">
                 <div>Source: {sourceContentType?.name}</div>
                 <div>Target: {targetContentType?.name}</div>
-                <div>Selected Language: {selectedLanguage}</div>
+                <div>Selected Language: {getLanguageFlag(selectedLanguage)} {selectedLanguage.toUpperCase()}</div>
                 <div>Items to migrate: {selectedItems.length}</div>
                 <div>Mapped fields: {migrationConfig?.fieldMappings.filter(m => m.targetField).length}</div>
                 {updateIncomingReferences && (
@@ -557,6 +790,43 @@ export default function App() {
               Ready to migrate {selectedItems.length} content item{selectedItems.length !== 1 ? 's' : ''} 
               from "{sourceContentType?.name}" to "{targetContentType?.name}".
             </p>
+            
+            {/* Download Reports Section - Show after migration completes */}
+            {migrationProgress === 100 && migrationResults.length > 0 && (
+              <div className="mb-6 p-4 bg-gradient-to-r from-green-50 to-blue-50 border border-green-200 rounded-lg">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    <div className="text-3xl">📊</div>
+                    <div>
+                      <h4 className="font-semibold text-gray-900">Migration Complete!</h4>
+                      <p className="text-sm text-gray-600">Download detailed reports of the migration process</p>
+                    </div>
+                  </div>
+                  <div className="flex space-x-3">
+                    <button
+                      onClick={generateTextReport}
+                      className="flex items-center space-x-2 px-4 py-2 bg-white text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium shadow-sm"
+                      title="Download human-readable text report"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      <span>Download TXT Report</span>
+                    </button>
+                    <button
+                      onClick={generateJSONReport}
+                      className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium shadow-sm"
+                      title="Download JSON report with all migration data"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      <span>Download JSON Report</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
             
             <div className="flex space-x-4">
               <button
@@ -603,6 +873,7 @@ export default function App() {
         <DryRunPreview
           migrationConfig={migrationConfig}
           selectedItems={selectedItems}
+          selectedLanguage={selectedLanguage}
           onClose={() => setShowDryRun(false)}
           onConfirmMigration={() => {
             setShowDryRun(false);

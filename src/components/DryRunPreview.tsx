@@ -1,10 +1,21 @@
 import { useState } from 'react';
 import { MigrationConfig, MigrationItem } from '../types';
 
+// Helper function to get language flag
+const getLanguageFlag = (languageCode: string): string => {
+  const languageFlags: Record<string, string> = {
+    'en': '🇬🇧',
+    'de': '🇩🇪',
+    'es': '🇪🇸',
+    'zh': '🇨🇳'
+  };
+  return languageFlags[languageCode] || '🌐';
+};
 
 interface DryRunPreviewProps {
   migrationConfig: MigrationConfig;
   selectedItems: MigrationItem[];
+  selectedLanguage: string;
   onClose: () => void;
   onConfirmMigration: () => void;
 }
@@ -24,6 +35,7 @@ interface DryRunResult {
 export function DryRunPreview({
   migrationConfig,
   selectedItems,
+  selectedLanguage,
   onClose,
   onConfirmMigration
 }: Readonly<DryRunPreviewProps>) {
@@ -178,6 +190,9 @@ export function DryRunPreview({
               {/* Summary */}
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                 <h3 className="font-medium text-blue-900 mb-2">Migration Summary</h3>
+                <div className="mb-3 text-sm text-blue-800">
+                  <strong>Language:</strong> {getLanguageFlag(selectedLanguage)} {selectedLanguage.toUpperCase()}
+                </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                   <div>
                     <div className="text-blue-800 font-medium">{selectedItems.length}</div>
