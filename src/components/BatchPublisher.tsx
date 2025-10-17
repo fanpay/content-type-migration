@@ -18,7 +18,6 @@ interface BatchPublisherProps {
 
 export function BatchPublisher({
   draftItems,
-  selectedLanguage,
   onPublish,
   onBack,
   onComplete
