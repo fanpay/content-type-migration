@@ -9,6 +9,7 @@ import { MigrationResultsModal } from './components/MigrationResultsModal';
 import { ItemRelationshipsViewer } from './components/ItemRelationshipsViewer';
 import { MigrationLogger, LogEntry } from './components/MigrationLogger';
 import { EnvironmentBadge } from './components/EnvironmentBadge';
+import { BatchPublisher } from './components/BatchPublisher';
 import { useContentTypes } from './hooks/useKontentData';
 import { useMigration } from './hooks/useMigration';
 import { ContentTypeInfo } from './types';
@@ -54,6 +55,7 @@ export default function App() {
   const [migrationLogs, setMigrationLogs] = useState<LogEntry[]>([]);
   const [migrationProgress, setMigrationProgress] = useState(0);
   const [currentMigrationStep, setCurrentMigrationStep] = useState<string>('');
+  const [draftItems, setDraftItems] = useState<any[]>([]);
   
   const { contentTypes, isLoading: typesLoading, error: typesError } = useContentTypes();
   const { 
@@ -712,6 +714,66 @@ export default function App() {
       setMigrationProgress(100);
       setCurrentMigrationStep('Migration completed');
       setMigrationResults(results);
+      
+      // Collect all draft items created during migration (avoid duplicates)
+      const allDraftItems: any[] = [];
+      const seenIds = new Set<string>();
+      
+      // 1. Add items created during migration
+      results.forEach(result => {
+        if (result.status === 'success' && Array.isArray(result.createdItems)) {
+          result.createdItems.forEach((item: any) => {
+            // Skip if we've already added this item ID
+            if (seenIds.has(item.newId)) {
+              return;
+            }
+            seenIds.add(item.newId);
+            
+            // Items created during migration are in draft state
+            allDraftItems.push({
+              id: item.newId,
+              name: item.newName,
+              codename: item.newCodename,
+              type: item.newType,
+              language: selectedLanguage,
+              wasAutoMigrated: item.wasAutoMigrated,
+              originalName: item.originalName,
+            });
+          });
+        }
+      });
+
+      // 2. Add items that had incoming references updated (they are now in draft too)
+      if (updateIncomingReferences && Array.isArray(itemRelationships)) {
+        itemRelationships.forEach(rel => {
+          if (Array.isArray(rel.incomingRelationships) && rel.incomingRelationships.length > 0) {
+            // Add each item that references the migrated item
+            rel.incomingRelationships.forEach((ref: any) => {
+              const refItemId = ref.fromItemId;
+              
+              // Skip if already added
+              if (seenIds.has(refItemId)) {
+                return;
+              }
+              
+              // Add this referencing item to draft items for publishing
+              allDraftItems.push({
+                id: refItemId,
+                name: ref.fromItemName,
+                codename: ref.fromItemCodename,
+                type: ref.fromItemType,
+                language: selectedLanguage,
+                wasAutoMigrated: false,
+                originalName: ref.fromItemName,
+              });
+              seenIds.add(refItemId);
+            });
+          }
+        });
+      }
+
+      setDraftItems(allDraftItems);
+      
       setShowResults(true);
       addLog('success', '✅ Migration completed successfully!', 
         `${results.filter(r => r.status === 'success').length} of ${results.length} items migrated`);
@@ -731,6 +793,44 @@ export default function App() {
 
   const handleBackToItemSelection = () => {
     setStep(3);
+  };
+
+  const handleContinueToPublishing = () => {
+    if (draftItems.length > 0) {
+      setStep(6);
+    }
+  };
+
+  const handlePublishBatch = async (itemsToPublish: any[], _batchSize: number) => {
+    const result = await kontentServiceFixed.publishItemsBatch(
+      itemsToPublish.map(item => ({
+        id: item.id,
+        language: selectedLanguage,
+        name: item.name,
+      })),
+      addLog
+    );
+    
+    // Log results but don't throw error - let the process continue
+    if (result.published > 0) {
+      addLog('success', `✅ Published ${result.published} item(s) in this batch`);
+    }
+    if (result.failed > 0) {
+      addLog('warning', `⚠️ ${result.failed} item(s) failed to publish in this batch`);
+      result.errors.forEach(err => addLog('error', `  → ${err}`));
+    }
+    
+    // Return the result so BatchPublisher can update its UI
+    return result;
+  };
+
+  const handlePublishingComplete = () => {
+    addLog('success', '🎉 All publishing operations completed!');
+    setStep(5); // Return to migration summary
+  };
+
+  const handleBackToMigrationSummary = () => {
+    setStep(5);
   };
 
   const renderStepIndicator = () => {
@@ -788,6 +888,17 @@ export default function App() {
           5
         </div>
         <span>Execute Migration</span>
+      </div>
+
+      <div className={`w-8 h-0.5 ${step >= 6 ? 'bg-blue-600' : 'bg-gray-200'}`}></div>
+      
+      <div className={`flex items-center space-x-2 ${step >= 6 ? 'text-blue-600' : 'text-gray-400'}`}>
+        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
+          step >= 6 ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'
+        }`}>
+          6
+        </div>
+        <span>Batch Publishing</span>
       </div>
     </div>
     );
@@ -1055,10 +1166,23 @@ export default function App() {
               >
                 Start Over
               </button>
+              
+              {migrationProgress === 100 && draftItems.length > 0 && (
+                <button
+                  onClick={handleContinueToPublishing}
+                  className="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-medium flex items-center space-x-2"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                  <span>Publish Draft Items ({draftItems.length})</span>
+                </button>
+              )}
+              
               <button
                 onClick={() => setShowDryRun(true)}
                 className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
-                disabled={selectedItems.length === 0}
+                disabled={selectedItems.length === 0 || migrationProgress === 100}
               >
                 Preview Migration
               </button>
@@ -1067,9 +1191,11 @@ export default function App() {
                 className={`px-8 py-3 rounded-lg font-medium ${
                   migrationInProgress 
                     ? 'bg-gray-400 text-white cursor-not-allowed'
+                    : migrationProgress === 100
+                    ? 'bg-gray-400 text-white cursor-not-allowed'
                     : 'bg-green-600 text-white hover:bg-green-700'
                 }`}
-                disabled={selectedItems.length === 0 || migrationInProgress}
+                disabled={selectedItems.length === 0 || migrationInProgress || migrationProgress === 100}
               >
                 {migrationInProgress ? (
                   <>
@@ -1085,6 +1211,17 @@ export default function App() {
               </button>
             </div>
           </div>
+        )}
+
+        {/* Step 6: Batch Publishing */}
+        {step === 6 && (
+          <BatchPublisher
+            draftItems={draftItems}
+            selectedLanguage={selectedLanguage}
+            onPublish={handlePublishBatch}
+            onBack={handleBackToMigrationSummary}
+            onComplete={handlePublishingComplete}
+          />
         )}
       </div>
 

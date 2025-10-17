@@ -1204,6 +1204,113 @@ export class KontentServiceFixed {
       };
     }
   }
+
+  /**
+   * Publish a language variant (move from draft to published workflow step)
+   * @param itemId - Item ID
+   * @param languageCodename - Language codename
+   * @param log - Optional logging function
+   * @returns Promise with success status
+   */
+  async publishLanguageVariant(
+    itemId: string,
+    languageCodename: string,
+    log?: (level: 'info' | 'success' | 'error' | 'warning', message: string, details?: string) => void
+  ): Promise<{ success: boolean; error?: string }> {
+    await this.ensureInitialized();
+
+    try {
+      const actualLanguage = languageCodename || 'default';
+      
+      log?.('info', `📤 Publishing item ${itemId} in ${actualLanguage}...`);
+
+      // Get the workflow step ID for "Published" status
+      const workflowsResponse = await this.managementClient
+        .listWorkflows()
+        .toPromise();
+
+      // Find the default workflow
+      const defaultWorkflow = workflowsResponse.data.find((w: any) => w.name === 'Default');
+      
+      if (!defaultWorkflow) {
+        throw new Error('Default workflow not found');
+      }
+
+      // Find the "Published" step (usually the last step)
+      const publishedStep = defaultWorkflow.publishedStep;
+      
+      if (!publishedStep) {
+        throw new Error('Published step not found in workflow');
+      }
+
+      log?.('info', `  → Moving to published step: ${publishedStep.name} (${publishedStep.codename})`);
+
+      // Items created during migration are already in Draft state, 
+      // so we can publish them directly without creating a new version
+      await this.managementClient
+        .publishLanguageVariant()
+        .byItemId(itemId)
+        .byLanguageCodename(actualLanguage)
+        .withoutData()
+        .toPromise();
+
+      log?.('success', `✅ Successfully published item ${itemId}`);
+
+      return { success: true };
+
+    } catch (error) {
+      // Get detailed error message from Axios error
+      let errorMessage = 'Unknown error';
+      if (error && typeof error === 'object') {
+        const axiosError = error as any;
+        if (axiosError.response?.data?.message) {
+          errorMessage = axiosError.response.data.message;
+        } else if (axiosError.response?.data?.error_code) {
+          errorMessage = `Error ${axiosError.response.data.error_code}: ${axiosError.response.data.message || 'API Error'}`;
+        } else if (axiosError.message) {
+          errorMessage = axiosError.message;
+        }
+      }
+      
+      log?.('error', `❌ Failed to publish item ${itemId}`, errorMessage);
+      console.error(`Failed to publish item ${itemId}:`, errorMessage, error);
+      
+      return { 
+        success: false,
+        error: errorMessage 
+      };
+    }
+  }
+
+  /**
+   * Publish multiple items in batches
+   * @param items - Array of items to publish (with id and language)
+   * @param log - Optional logging function
+   * @returns Promise with results
+   */
+  async publishItemsBatch(
+    items: Array<{ id: string; language: string; name: string }>,
+    log?: (level: 'info' | 'success' | 'error' | 'warning', message: string, details?: string) => void
+  ): Promise<{ published: number; failed: number; errors: string[] }> {
+    const results = {
+      published: 0,
+      failed: 0,
+      errors: [] as string[]
+    };
+
+    for (const item of items) {
+      const result = await this.publishLanguageVariant(item.id, item.language, log);
+      
+      if (result.success) {
+        results.published++;
+      } else {
+        results.failed++;
+        results.errors.push(`${item.name}: ${result.error || 'Unknown error'}`);
+      }
+    }
+
+    return results;
+  }
 }
 
 // Export singleton instance

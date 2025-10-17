@@ -30,7 +30,7 @@ export function ContentItemList({
   }, [items, searchTerm]);
 
   const selectedCount = selectedItems.size;
-  const allSelected = filteredItems.length > 0 && selectedItems.size === filteredItems.filter(item => selectedItems.has(item.id)).length;
+  const allSelected = filteredItems.length > 0 && filteredItems.every(item => selectedItems.has(item.id));
 
   const handleItemToggle = (itemId: string) => {
     const newSelected = new Set(selectedItems);
