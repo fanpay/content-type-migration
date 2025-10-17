@@ -13,6 +13,7 @@ import { useContentTypes } from './hooks/useKontentData';
 import { useMigration } from './hooks/useMigration';
 import { ContentTypeInfo } from './types';
 import { kontentServiceFixed } from './services/kontentServiceFixed';
+import * as XLSX from 'xlsx';
 
 // Helper function to get language flag
 const getLanguageFlag = (languageCode: string): string => {
@@ -332,6 +333,215 @@ export default function App() {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
     const filename = `migration-report-${timestamp}.txt`;
     downloadFile(report, filename, 'text/plain');
+  };
+
+  // Generate Excel report with multiple sheets
+  const generateExcelReport = () => {
+    console.log('📊 Generating Excel report...');
+    
+    const successCount = migrationResults.filter(r => r.status === 'success').length;
+    const errorCount = migrationResults.filter(r => r.status === 'error').length;
+    
+    // Create a new workbook
+    const workbook = XLSX.utils.book_new();
+    
+    // Sheet 1: Summary
+    const summaryData = [
+      ['KONTENT.AI CONTENT TYPE MIGRATION REPORT'],
+      [],
+      ['Date:', new Date().toLocaleString()],
+      ['Language:', `${getLanguageFlag(selectedLanguage)} ${selectedLanguage.toUpperCase()}`],
+      [],
+      ['MIGRATION SUMMARY'],
+      ['Source Content Type:', sourceContentType?.name || 'Unknown', `(${sourceContentType?.codename || 'unknown'})`],
+      ['Target Content Type:', targetContentType?.name || 'Unknown', `(${targetContentType?.codename || 'unknown'})`],
+      ['Total Items Processed:', migrationResults.length],
+      ['Successful Migrations:', successCount],
+      ['Failed Migrations:', errorCount],
+      ['Update Incoming References:', updateIncomingReferences ? 'Yes' : 'No'],
+    ];
+    
+    if (updateIncomingReferences && Array.isArray(itemRelationships)) {
+      const totalRefs = itemRelationships.reduce((sum, rel) => {
+        return sum + (Array.isArray(rel.incomingRelationships) ? rel.incomingRelationships.length : 0);
+      }, 0);
+      summaryData.push(['Total Incoming References:', totalRefs]);
+    }
+    
+    const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
+    
+    // Set column widths
+    summarySheet['!cols'] = [
+      { wch: 30 },
+      { wch: 40 },
+      { wch: 30 }
+    ];
+    
+    XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary');
+    
+    // Sheet 2: Field Mappings
+    const fieldMappingsData: any[] = [
+      ['Source Field', 'Source Type', 'Target Field', 'Target Type', 'Transformation Needed', 'Warnings']
+    ];
+    
+    migrationConfig?.fieldMappings.filter(m => m.targetField).forEach(m => {
+      const warnings = (m.warnings && Array.isArray(m.warnings)) ? m.warnings.join('; ') : '';
+      fieldMappingsData.push([
+        m.sourceField.name,
+        m.sourceField.type,
+        m.targetField?.name || 'N/A',
+        m.targetField?.type || 'N/A',
+        m.transformationNeeded ? 'Yes' : 'No',
+        warnings
+      ]);
+    });
+    
+    const fieldMappingsSheet = XLSX.utils.aoa_to_sheet(fieldMappingsData);
+    fieldMappingsSheet['!cols'] = [
+      { wch: 25 },
+      { wch: 20 },
+      { wch: 25 },
+      { wch: 20 },
+      { wch: 20 },
+      { wch: 50 }
+    ];
+    
+    XLSX.utils.book_append_sheet(workbook, fieldMappingsSheet, 'Field Mappings');
+    
+    // Sheet 3: Migrated Items
+    const migratedItemsData: any[] = [
+      ['#', 'Item Name', 'Codename', 'Status', 'New Item ID', 'Message', 'Completed']
+    ];
+    
+    migrationResults.forEach((result, index) => {
+      migratedItemsData.push([
+        index + 1,
+        result.sourceItem.name,
+        result.sourceItem.codename,
+        result.status === 'success' ? 'SUCCESS' : 'FAILED',
+        result.newItemId || 'N/A',
+        result.message,
+        result.timestamp.toLocaleString()
+      ]);
+    });
+    
+    const migratedItemsSheet = XLSX.utils.aoa_to_sheet(migratedItemsData);
+    migratedItemsSheet['!cols'] = [
+      { wch: 5 },
+      { wch: 30 },
+      { wch: 25 },
+      { wch: 10 },
+      { wch: 40 },
+      { wch: 50 },
+      { wch: 20 }
+    ];
+    
+    XLSX.utils.book_append_sheet(workbook, migratedItemsSheet, 'Migrated Items');
+    
+    // Sheet 4: Created Items Details
+    const createdItemsData: any[] = [
+      ['Source Item', 'Created Item Name', 'Original Type', 'New Type', 'Original Codename', 'New Codename', 'New ID', 'Auto-Migrated', 'Already Existed']
+    ];
+    
+    migrationResults.forEach(result => {
+      if (result.createdItems && result.createdItems.length > 0) {
+        result.createdItems.forEach((item: any) => {
+          createdItemsData.push([
+            result.sourceItem.name,
+            item.newName,
+            item.originalType,
+            item.newType,
+            item.originalCodename,
+            item.newCodename,
+            item.newId,
+            item.wasAutoMigrated ? 'Yes' : 'No',
+            item.alreadyExisted ? 'Yes' : 'No'
+          ]);
+        });
+      }
+    });
+    
+    const createdItemsSheet = XLSX.utils.aoa_to_sheet(createdItemsData);
+    createdItemsSheet['!cols'] = [
+      { wch: 30 },
+      { wch: 30 },
+      { wch: 20 },
+      { wch: 20 },
+      { wch: 25 },
+      { wch: 25 },
+      { wch: 40 },
+      { wch: 15 },
+      { wch: 15 }
+    ];
+    
+    XLSX.utils.book_append_sheet(workbook, createdItemsSheet, 'Created Items');
+    
+    // Sheet 5: Incoming References (if applicable)
+    if (updateIncomingReferences && Array.isArray(itemRelationships) && itemRelationships.length > 0) {
+      const referencesData: any[] = [
+        ['Migrated Item', 'Migrated Item Codename', 'Referenced From Item', 'Referenced From Type', 'Field Name']
+      ];
+      
+      itemRelationships.forEach(rel => {
+        if (rel.incomingRelationships && Array.isArray(rel.incomingRelationships) && rel.incomingRelationships.length > 0) {
+          rel.incomingRelationships.forEach((ref: any) => {
+            referencesData.push([
+              rel.itemName,
+              rel.itemCodename,
+              ref.fromItemName,
+              ref.fromItemType,
+              ref.fieldName
+            ]);
+          });
+        }
+      });
+      
+      const referencesSheet = XLSX.utils.aoa_to_sheet(referencesData);
+      referencesSheet['!cols'] = [
+        { wch: 30 },
+        { wch: 25 },
+        { wch: 30 },
+        { wch: 25 },
+        { wch: 25 }
+      ];
+      
+      XLSX.utils.book_append_sheet(workbook, referencesSheet, 'Incoming References');
+    }
+    
+    // Sheet 6: Migration Logs
+    const logsData: any[] = [
+      ['Timestamp', 'Level', 'Message', 'Details']
+    ];
+    
+    migrationLogs.forEach(log => {
+      const levelText = log.level === 'success' ? 'SUCCESS' : 
+                       log.level === 'error' ? 'ERROR' : 
+                       log.level === 'warning' ? 'WARNING' : 'INFO';
+      logsData.push([
+        log.timestamp.toLocaleString(),
+        levelText,
+        log.message,
+        log.details || ''
+      ]);
+    });
+    
+    const logsSheet = XLSX.utils.aoa_to_sheet(logsData);
+    logsSheet['!cols'] = [
+      { wch: 20 },
+      { wch: 10 },
+      { wch: 60 },
+      { wch: 40 }
+    ];
+    
+    XLSX.utils.book_append_sheet(workbook, logsSheet, 'Migration Logs');
+    
+    // Generate and download the file
+    const excelTimestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+    const excelFilename = `migration-report-${excelTimestamp}.xlsx`;
+    
+    console.log('📥 Downloading Excel file:', excelFilename);
+    XLSX.writeFile(workbook, excelFilename);
+    console.log('✅ Excel report downloaded');
   };
 
   const handleExecuteMigration = async () => {
@@ -811,7 +1021,17 @@ export default function App() {
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                       </svg>
-                      <span>Download TXT Report</span>
+                      <span>TXT</span>
+                    </button>
+                    <button
+                      onClick={generateExcelReport}
+                      className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium shadow-sm"
+                      title="Download Excel spreadsheet with detailed data"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      <span>Excel</span>
                     </button>
                     <button
                       onClick={generateJSONReport}
@@ -821,7 +1041,7 @@ export default function App() {
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                       </svg>
-                      <span>Download JSON Report</span>
+                      <span>JSON</span>
                     </button>
                   </div>
                 </div>
