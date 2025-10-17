@@ -25,6 +25,7 @@ export function BatchPublisher({
 }: Readonly<BatchPublisherProps>) {
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [publishedItems, setPublishedItems] = useState<Set<string>>(new Set());
+  const [searchTerm, setSearchTerm] = useState('');
   const [batchSize, setBatchSize] = useState(5);
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishProgress, setPublishProgress] = useState(0);
@@ -33,16 +34,33 @@ export function BatchPublisher({
   const [currentBatch, setCurrentBatch] = useState(0);
   const [totalBatches, setTotalBatches] = useState(0);
 
+  // Filter items based on search term
+  const filteredItems = searchTerm.trim() 
+    ? draftItems.filter(item => 
+        item.name.toLowerCase().includes(searchTerm.toLowerCase().trim()) ||
+        item.codename.toLowerCase().includes(searchTerm.toLowerCase().trim()) ||
+        item.type.toLowerCase().includes(searchTerm.toLowerCase().trim())
+      )
+    : draftItems;
+
   // Select all items by default
   useEffect(() => {
     setSelectedItems(new Set(draftItems.map(item => item.id)));
   }, [draftItems]);
 
   const handleSelectAll = () => {
-    if (selectedItems.size === draftItems.length) {
-      setSelectedItems(new Set());
+    const allFilteredSelected = filteredItems.every(item => selectedItems.has(item.id));
+    
+    if (allFilteredSelected) {
+      // Deselect all filtered items
+      const newSelected = new Set(selectedItems);
+      filteredItems.forEach(item => newSelected.delete(item.id));
+      setSelectedItems(newSelected);
     } else {
-      setSelectedItems(new Set(draftItems.map(item => item.id)));
+      // Select all filtered items
+      const newSelected = new Set(selectedItems);
+      filteredItems.forEach(item => newSelected.add(item.id));
+      setSelectedItems(newSelected);
     }
   };
 
@@ -118,7 +136,7 @@ export function BatchPublisher({
         <div>
           <h2 className="text-xl font-semibold text-gray-900">Publish Draft Items</h2>
           <p className="mt-1 text-sm text-gray-600">
-            {draftItems.length} items were created in draft state during the migration.
+            {searchTerm ? `${filteredItems.length} of ${draftItems.length}` : draftItems.length} items available.
             Select which items to publish and configure batch size to control webhook load.
           </p>
         </div>
@@ -162,6 +180,34 @@ export function BatchPublisher({
         </div>
       </div>
 
+      {/* Search/Filter */}
+      <div className="relative">
+        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+          <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+        </div>
+        <input
+          type="text"
+          placeholder="Search by name, codename, or type..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          disabled={isPublishing}
+        />
+        {searchTerm && (
+          <button
+            onClick={() => setSearchTerm('')}
+            className="absolute inset-y-0 right-0 pr-3 flex items-center"
+            disabled={isPublishing}
+          >
+            <svg className="h-5 w-5 text-gray-400 hover:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        )}
+      </div>
+
       {/* Progress */}
       {isPublishing && (
         <div className="bg-green-50 border border-green-200 rounded-lg p-4">
@@ -189,53 +235,59 @@ export function BatchPublisher({
           <label className="flex items-center space-x-2 cursor-pointer">
             <input
               type="checkbox"
-              checked={selectedItems.size === draftItems.length}
+              checked={filteredItems.length > 0 && filteredItems.every(item => selectedItems.has(item.id))}
               onChange={handleSelectAll}
               className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-              disabled={isPublishing}
+              disabled={isPublishing || filteredItems.length === 0}
             />
             <span className="text-sm font-medium text-gray-900">
-              Select All ({draftItems.length} items)
+              Select All ({searchTerm ? `${filteredItems.length} of ${draftItems.length}` : draftItems.length} items)
             </span>
           </label>
         </div>
 
         <div className="max-h-96 overflow-y-auto">
-          {draftItems.map(item => {
-            const isPublished = publishedItems.has(item.id);
-            return (
-              <div
-                key={item.id}
-                className={`px-4 py-3 border-b border-gray-100 hover:bg-gray-50 flex items-center space-x-3 ${
-                  isPublished ? 'bg-green-50' : ''
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedItems.has(item.id)}
-                  onChange={() => handleToggleItem(item.id)}
-                  className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                  disabled={isPublishing || isPublished}
-                />
-                <div className="flex-1">
-                  <div className="font-medium text-gray-900">{item.name}</div>
-                  <div className="text-sm text-gray-500">
-                    {item.codename} • {item.type}
+          {filteredItems.length === 0 ? (
+            <div className="px-4 py-8 text-center text-gray-500">
+              {searchTerm ? 'No items match your search' : 'No items available'}
+            </div>
+          ) : (
+            filteredItems.map(item => {
+              const isPublished = publishedItems.has(item.id);
+              return (
+                <div
+                  key={item.id}
+                  className={`px-4 py-3 border-b border-gray-100 hover:bg-gray-50 flex items-center space-x-3 ${
+                    isPublished ? 'bg-green-50' : ''
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedItems.has(item.id)}
+                    onChange={() => handleToggleItem(item.id)}
+                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    disabled={isPublishing || isPublished}
+                  />
+                  <div className="flex-1">
+                    <div className="font-medium text-gray-900">{item.name}</div>
+                    <div className="text-sm text-gray-500">
+                      {item.codename} • {item.type}
+                    </div>
                   </div>
+                  {isPublished ? (
+                    <div className="flex items-center space-x-1 text-xs px-2 py-1 bg-green-100 text-green-800 rounded">
+                      <span>✓</span>
+                      <span>Published</span>
+                    </div>
+                  ) : (
+                    <div className="text-xs px-2 py-1 bg-yellow-100 text-yellow-800 rounded">
+                      Draft
+                    </div>
+                  )}
                 </div>
-                {isPublished ? (
-                  <div className="flex items-center space-x-1 text-xs px-2 py-1 bg-green-100 text-green-800 rounded">
-                    <span>✓</span>
-                    <span>Published</span>
-                  </div>
-                ) : (
-                  <div className="text-xs px-2 py-1 bg-yellow-100 text-yellow-800 rounded">
-                    Draft
-                  </div>
-                )}
-              </div>
-            );
-          })}
+              );
+            })
+          )}
         </div>
       </div>
 
