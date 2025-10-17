@@ -639,6 +639,9 @@ export default function App() {
         setMigrationProgress(progress);
       }
       
+      // Track which items had their references successfully updated
+      const updatedReferenceItems = new Set<string>();
+      
       // Update incoming references if enabled
       if (updateIncomingReferences && itemRelationships.length > 0) {
         setCurrentMigrationStep('Updating incoming references');
@@ -694,6 +697,8 @@ export default function App() {
               if (updateResult.success) {
                 addLog('success', `  ✅ Successfully updated reference`, 
                   `In item: ${incomingRef.fromItemName}`);
+                // Track this item as having been updated
+                updatedReferenceItems.add(incomingRef.fromItemId);
               } else {
                 addLog('error', `  ❌ Failed to update reference`, 
                   updateResult.error || 'Unknown error');
@@ -719,10 +724,15 @@ export default function App() {
       const allDraftItems: any[] = [];
       const seenIds = new Set<string>();
       
-      // 1. Add items created during migration
+      // 1. Add items created during migration (exclude items that already existed)
       results.forEach(result => {
         if (result.status === 'success' && Array.isArray(result.createdItems)) {
           result.createdItems.forEach((item: any) => {
+            // Skip items that already existed (they were not created, just referenced)
+            if (item.alreadyExisted) {
+              return;
+            }
+            
             // Skip if we've already added this item ID
             if (seenIds.has(item.newId)) {
               return;
@@ -750,6 +760,11 @@ export default function App() {
             // Add each item that references the migrated item
             rel.incomingRelationships.forEach((ref: any) => {
               const refItemId = ref.fromItemId;
+              
+              // Skip if not in the updated items set (not actually updated)
+              if (!updatedReferenceItems.has(refItemId)) {
+                return;
+              }
               
               // Skip if already added
               if (seenIds.has(refItemId)) {
