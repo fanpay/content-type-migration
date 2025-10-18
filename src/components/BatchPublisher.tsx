@@ -25,6 +25,7 @@ export function BatchPublisher({
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [publishedItems, setPublishedItems] = useState<Set<string>>(new Set());
   const [searchTerm, setSearchTerm] = useState('');
+  const [showOnlyPages, setShowOnlyPages] = useState(false);
   const [batchSize, setBatchSize] = useState(5);
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishProgress, setPublishProgress] = useState(0);
@@ -33,14 +34,26 @@ export function BatchPublisher({
   const [currentBatch, setCurrentBatch] = useState(0);
   const [totalBatches, setTotalBatches] = useState(0);
 
-  // Filter items based on search term
-  const filteredItems = searchTerm.trim() 
-    ? draftItems.filter(item => 
-        item.name.toLowerCase().includes(searchTerm.toLowerCase().trim()) ||
-        item.codename.toLowerCase().includes(searchTerm.toLowerCase().trim()) ||
-        item.type.toLowerCase().includes(searchTerm.toLowerCase().trim())
-      )
-    : draftItems;
+  // Count page items
+  const pageItemsCount = draftItems.filter(item => item.type.toLowerCase() === 'page').length;
+
+  // Filter items based on search term and page filter
+  const filteredItems = draftItems.filter(item => {
+    // Apply page filter first
+    if (showOnlyPages && item.type.toLowerCase() !== 'page') {
+      return false;
+    }
+    
+    // Then apply search filter
+    if (searchTerm.trim()) {
+      const search = searchTerm.toLowerCase().trim();
+      return item.name.toLowerCase().includes(search) ||
+             item.codename.toLowerCase().includes(search) ||
+             item.type.toLowerCase().includes(search);
+    }
+    
+    return true;
+  });
 
   // Select all items by default
   useEffect(() => {
@@ -135,8 +148,14 @@ export function BatchPublisher({
         <div>
           <h2 className="text-xl font-semibold text-gray-900">Publish Draft Items</h2>
           <p className="mt-1 text-sm text-gray-600">
-            {searchTerm ? `${filteredItems.length} of ${draftItems.length}` : draftItems.length} items available.
-            Select which items to publish and configure batch size to control webhook load.
+            {showOnlyPages && !searchTerm ? (
+              <>Showing <strong className="text-amber-700">{filteredItems.length} page items</strong> out of {draftItems.length} total items.</>
+            ) : searchTerm || showOnlyPages ? (
+              <>{filteredItems.length} of {draftItems.length} items available.</>
+            ) : (
+              <>{draftItems.length} items available.</>
+            )}
+            {' '}Select which items to publish and configure batch size to control webhook load.
           </p>
         </div>
         <button
@@ -180,31 +199,62 @@ export function BatchPublisher({
       </div>
 
       {/* Search/Filter */}
-      <div className="relative">
-        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-          <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-        </div>
-        <input
-          type="text"
-          placeholder="Search by name, codename, or type..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          disabled={isPublishing}
-        />
-        {searchTerm && (
-          <button
-            onClick={() => setSearchTerm('')}
-            className="absolute inset-y-0 right-0 pr-3 flex items-center"
-            disabled={isPublishing}
-          >
-            <svg className="h-5 w-5 text-gray-400 hover:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+      <div className="space-y-3">
+        <div className="relative">
+          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+            <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
-          </button>
-        )}
+          </div>
+          <input
+            type="text"
+            placeholder="Search by name, codename, or type..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            disabled={isPublishing}
+          />
+          {searchTerm && (
+            <button
+              onClick={() => setSearchTerm('')}
+              className="absolute inset-y-0 right-0 pr-3 flex items-center"
+              disabled={isPublishing}
+            >
+              <svg className="h-5 w-5 text-gray-400 hover:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+        </div>
+
+        {/* Page Filter - Highlighted */}
+        <div className="bg-amber-50 border-2 border-amber-300 rounded-lg p-3">
+          <label className="flex items-center space-x-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showOnlyPages}
+              onChange={(e) => setShowOnlyPages(e.target.checked)}
+              className="w-5 h-5 text-amber-600 border-amber-400 rounded focus:ring-amber-500"
+              disabled={isPublishing}
+            />
+            <div className="flex-1">
+              <div className="flex items-center space-x-2">
+                <svg className="h-5 w-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                </svg>
+                <span className="font-semibold text-amber-900">
+                  Show only Page items
+                </span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-200 text-amber-900">
+                  {pageItemsCount} pages
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-amber-700">
+                Filter to see only content items of type "page" - critical for understanding which website pages will be affected by the migration
+              </p>
+            </div>
+          </label>
+        </div>
       </div>
 
       {/* Progress */}
@@ -253,12 +303,13 @@ export function BatchPublisher({
           ) : (
             filteredItems.map(item => {
               const isPublished = publishedItems.has(item.id);
+              const isPageType = item.type.toLowerCase() === 'page';
               return (
                 <div
                   key={item.id}
                   className={`px-4 py-3 border-b border-gray-100 hover:bg-gray-50 flex items-center space-x-3 ${
                     isPublished ? 'bg-green-50' : ''
-                  }`}
+                  } ${isPageType ? 'border-l-4 border-l-amber-400' : ''}`}
                 >
                   <input
                     type="checkbox"
@@ -268,7 +319,16 @@ export function BatchPublisher({
                     disabled={isPublishing || isPublished}
                   />
                   <div className="flex-1">
-                    <div className="font-medium text-gray-900">{item.name}</div>
+                    <div className="flex items-center space-x-2">
+                      {isPageType && (
+                        <svg className="h-4 w-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                        </svg>
+                      )}
+                      <span className={`font-medium ${isPageType ? 'text-amber-900' : 'text-gray-900'}`}>
+                        {item.name}
+                      </span>
+                    </div>
                     <div className="text-sm text-gray-500">
                       {item.codename} • {item.type}
                     </div>
@@ -279,7 +339,11 @@ export function BatchPublisher({
                       <span>Published</span>
                     </div>
                   ) : (
-                    <div className="text-xs px-2 py-1 bg-yellow-100 text-yellow-800 rounded">
+                    <div className={`text-xs px-2 py-1 rounded ${
+                      isPageType 
+                        ? 'bg-amber-100 text-amber-800 font-semibold' 
+                        : 'bg-yellow-100 text-yellow-800'
+                    }`}>
                       Draft
                     </div>
                   )}

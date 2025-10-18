@@ -15,12 +15,12 @@ A production-ready custom application for Kontent.ai that enables seamless migra
 - **Duplicate Prevention**: Detects and skips already migrated items
 - **Comprehensive Logging**: Real-time UI logger with color-coded messages
 - **Responsive Interface**: Modern design with Tailwind CSS
-- **Step-by-Step Workflow**: Guided 5-step migration process
+- **Step-by-Step Workflow**: Guided 6-step migration process
+- **Batch Publishing**: Controlled publishing with webhook load management
 - **🆕 Dual Configuration Mode**: Works as standalone app or Kontent.ai Custom App with SDK integration
 - **🆕 Environment Badge**: Visual indicator showing current environment and user info
 
-📚 **For detailed feature documentation, see [FEATURES.md](./FEATURES.md)**
-📋 **For Custom App configuration in Kontent.ai, see [CUSTOM_APP_CONFIG.md](./CUSTOM_APP_CONFIG.md)**
+📋 **For Custom App configuration in Kontent.ai**
 
 ## 🏗️ Architecture
 
@@ -60,11 +60,13 @@ A production-ready custom application for Kontent.ai that enables seamless migra
 ```
 src/
 ├── components/                    # React UI Components
+│   ├── BatchPublisher.tsx         # Batch publishing interface with webhook protection
 │   ├── ConnectionStatus.tsx       # API connection status indicator
 │   ├── ContentItemList.tsx        # List and selection of content items
 │   ├── ContentTypeSelector.tsx    # Source/target content type selection
 │   ├── DebugPanel.tsx            # Development debugging panel
 │   ├── DryRunPreview.tsx         # Preview mode before migration
+│   ├── EnvironmentBadge.tsx      # Environment and user info display
 │   ├── FieldMappingEditor.tsx    # Visual field mapping interface
 │   ├── ItemRelationshipsViewer.tsx # Relationship analysis viewer
 │   ├── MigrationLogger.tsx       # Real-time migration logger
@@ -149,7 +151,7 @@ src/
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  STEP 1: Content Type Selection                             │
+│  STEP 1: Select Content Types                               │
 │  ┌────────────────────────────────────────────────────┐    │
 │  │  • User selects source content type                │    │
 │  │  • User selects target content type                │    │
@@ -159,7 +161,7 @@ src/
                            │
                            ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  STEP 2: Field Mapping Configuration                        │
+│  STEP 2: Map Fields                                         │
 │  ┌────────────────────────────────────────────────────┐    │
 │  │  • Auto-map fields by codename/name                │    │
 │  │  • Manual mapping adjustments                      │    │
@@ -170,17 +172,18 @@ src/
                            │
                            ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  STEP 3: Content Item Selection                             │
+│  STEP 3: Select Items                                       │
 │  ┌────────────────────────────────────────────────────┐    │
 │  │  • Load items from source content type             │    │
 │  │  • User selects items to migrate                   │    │
 │  │  • Select language variant                         │    │
+│  │  • Filter by page type (optional)                  │    │
 │  └────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────┘
                            │
                            ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  STEP 4: Relationship Analysis                              │
+│  STEP 4: View Relationships                                 │
 │  ┌────────────────────────────────────────────────────┐    │
 │  │  • Analyze outgoing references (items used)        │    │
 │  │  • Analyze incoming references (used by items)     │    │
@@ -191,7 +194,7 @@ src/
                            │
                            ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  STEP 5: Migration Execution                                │
+│  STEP 5: Execute Migration                                  │
 │  ┌────────────────────────────────────────────────────┐    │
 │  │  FOR EACH selected item:                           │    │
 │  │    1. Fetch source item data (Delivery API)       │    │
@@ -199,7 +202,7 @@ src/
 │  │    3. Create new content item                      │    │
 │  │    4. Map and transform fields                     │    │
 │  │    5. Handle linked items (recursive)              │    │
-│  │    6. Create language variant                      │    │
+│  │    6. Create language variant (Draft status)       │    │
 │  │    7. Update progress                              │    │
 │  │                                                     │    │
 │  │  IF update_references enabled:                     │    │
@@ -208,6 +211,19 @@ src/
 │  │      2. Update reference field                     │    │
 │  │      3. Save updated variant                       │    │
 │  │      4. Update progress                            │    │
+│  └────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│  STEP 6: Batch Publishing (Optional)                        │
+│  ┌────────────────────────────────────────────────────┐    │
+│  │  • Review migrated draft items                     │    │
+│  │  • Select items to publish                         │    │
+│  │  • Configure batch size (1-50 items)               │    │
+│  │  • Filter by page type (highlighted)               │    │
+│  │  • Monitor publishing progress                     │    │
+│  │  • 2-second delay between batches                  │    │
 │  └────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -241,7 +257,7 @@ async migrateContentItem(
   const newItem = await managementClient
     .addContentItem()
     .withData({
-      name: `[MIGRATED] ${sourceItem.name}`,
+      name: `${sourceItem.name}`,
       type: { codename: targetContentType.codename }
     })
     .toPromise();
@@ -526,14 +542,15 @@ Configure in **Environment settings > Custom apps > Parameters (JSON)**:
 2. **Select Content Types**: Choose source and target types
 3. **Map Fields**: Configure field mappings
 4. **Select Items**: Choose items to migrate
-5. **Analyze Relationships**: Review dependencies
+5. **View Relationships**: Review dependencies
 6. **Execute Migration**: Run and monitor progress
+7. **Batch Publishing** (Optional): Publish migrated items in controlled batches
 
 ### Detailed Step-by-Step Guide
 
 ### Detailed Step-by-Step
 
-#### Step 1: Content Type Selection
+#### Step 1: Select Content Types
 
 1. Select the **Source Content Type** from which you want to migrate content items
 2. Select the **Target Content Type** to which you want to migrate the content items
@@ -545,7 +562,7 @@ Configure in **Environment settings > Custom apps > Parameters (JSON)**:
 - Validates that source and target types are different
 - Loads content type structures for field mapping
 
-#### Step 2: Field Mapping
+#### Step 2: Map Fields
 
 1. **Automatic Mapping**: The system automatically maps fields with:
    - Identical codenames
@@ -578,19 +595,25 @@ Configure in **Environment settings > Custom apps > Parameters (JSON)**:
 | URL Slug | URL Slug, Text |
 | Custom Element | Custom Element, Text |
 
-#### Step 3: Item Selection
+#### Step 3: Select Items
 
 1. **View Items**: All items from source content type are loaded
 2. **Select Items**: 
    - Use checkboxes to select items to migrate
    - Search/filter available
+   - 🔥 **Page Filter**: Show only "page" content type items (highlighted with amber border)
 3. **Choose Language**: Select language variant to migrate
 4. **Review Selection**: Confirm count and selected items
 5. Click **Continue**
 
+**Page Items Highlighting**:
+- Page items have a **yellow/amber left border** (📄 icon)
+- Special filter to show only page items
+- Helps identify critical website pages before migration
+
 **Performance Note**: For large content types (>100 items), consider batching migrations
 
-#### Step 4: Relationship Analysis
+#### Step 4: View Relationships
 
 The system performs deep analysis of selected items:
 
@@ -624,9 +647,7 @@ Incoming Relationships (3):
 - ☑️ **Enabled**: Automatically updates all items that reference migrated items
 - ☐ **Disabled**: You'll need to manually update references later
 
-📚 **For detailed relationship documentation, see [RELATIONSHIPS.md](./RELATIONSHIPS.md)**
-
-#### Step 5: Migration Execution
+#### Step 5: Execute Migration
 
 1. **Review Configuration**: 
    - Source → Target types
@@ -634,7 +655,9 @@ Incoming Relationships (3):
    - Items to migrate count
    - Incoming references count (if enabled)
 
-2. **Monitor Progress**:
+2. **Start Migration**: Click "Start Migration" button
+
+3. **Monitor Progress**:
    - **Progress Bar**: Shows 0-100% completion
    - **Current Step**: Displays current operation
    - **Real-time Logs**: Color-coded messages
@@ -643,7 +666,7 @@ Incoming Relationships (3):
      - 🟡 **Yellow (Warning)**: Warnings/skipped items
      - 🔴 **Red (Error)**: Errors/failures
 
-3. **Migration Logs Example**:
+4. **Migration Logs Example**:
 ```
 🚀 Starting migration process...
 📝 Migrating item 1/3: Contact Us Tag
@@ -673,12 +696,66 @@ Incoming Relationships (3):
 ✅ Migration completed successfully! (3 of 3 items migrated)
 ```
 
-4. **Results Summary**:
+5. **Results Summary**:
    - Total items migrated
    - Success/failure breakdown
-   - List of created items with IDs
+   - List of created items with IDs (in Draft status)
    - Auto-migrated linked items
    - Updated references count
+
+6. **Next Steps**: Proceed to Step 6 (Batch Publishing) or skip if items should remain in draft
+
+#### Step 6: Batch Publishing (Optional)
+
+After migration, all items are in **Draft** status. This optional step allows controlled publishing:
+
+1. **Review Draft Items**:
+   - See all migrated items in draft status
+   - Items marked with yellow "Draft" badge
+   - Published items show green checkmark (✓)
+
+2. **Search & Filter**:
+   - Search by name, codename, or type
+   - 🔥 **Page Filter**: Show only "page" items (amber highlighting)
+   - Page items have **yellow/amber left border** and 📄 icon
+
+3. **Configure Batch Settings**:
+   - **Items per Batch**: Adjust from 1-50 items
+   - **Estimated Batches**: Calculated automatically
+   - **Estimated Time**: ~2 seconds per batch
+   - Smaller batches = less webhook load (safer)
+   - Larger batches = faster publishing (may stress webhooks)
+
+4. **Select Items to Publish**:
+   - Check items individually
+   - Use "Select All" for filtered items
+   - View selected count and batch estimates
+
+5. **Publish**:
+   - Click "Publish X Items" button
+   - Monitor real-time progress:
+     - Current batch number (e.g., "batch 2 of 5")
+     - Progress bar (0-100%)
+     - Published count vs. errors
+   - 2-second delay between batches (webhook protection)
+
+6. **Publishing Strategy**:
+
+**Recommended Batch Sizes:**
+- **1-5 items**: Slow but safest (recommended for critical pages)
+- **5-10 items**: Balanced approach
+- **10-50 items**: Fast but may stress webhooks
+
+**Visual Indicators:**
+- 📄 Page items have amber highlighting
+- ✅ Published items show green checkmark
+- ⏸️ Draft items show yellow badge
+
+7. **Skip Publishing** (Optional):
+   - Click "Skip Publishing" to leave items in draft
+   - Publish manually later from Kontent.ai UI
+
+**⚠️ Important**: Publishing triggers webhooks. Use smaller batches if you have webhook integrations to avoid overwhelming external systems.
 
 ## 🎯 Advanced Features
 
