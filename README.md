@@ -78,16 +78,16 @@ src/
 │   └── useMigration.ts           # Migration logic orchestration
 │
 ├── services/                      # API Services
-│   ├── kontentService.ts         # Abstract Kontent.ai service
-│   ├── kontentServiceFixed.ts    # Production service implementation
-│   ├── kontentServiceReal.ts     # Alternative implementation
+│   ├── kontentService.ts         # Base Kontent.ai service class
+│   ├── kontentServiceFixed.ts    # Main service implementation (used in production)
 │   └── migrationService.ts       # Migration business logic
 │
 ├── types/                         # TypeScript Definitions
 │   └── index.ts                  # Shared type definitions
 │
 ├── config/                        # Configuration
-│   └── kontent.ts                # Kontent.ai SDK configuration
+│   ├── appConfig.ts              # App configuration (SDK + env variables)
+│   └── kontent.ts                # Kontent.ai SDK initialization
 │
 ├── App.tsx                        # Main application component
 ├── main.tsx                       # Application entry point
@@ -134,10 +134,10 @@ src/
 #### 4. **Hooks**
 
 **useKontentData.ts**:
-- Data fetching with React Query patterns
+- Data fetching with useState/useEffect
 - Content type loading
 - Content item retrieval
-- Caching and state management
+- State management and caching
 
 **useMigration.ts**:
 - Migration state management
@@ -488,7 +488,7 @@ const addLog = (level: LogLevel, message: string, details?: string) => {
 };
 
 // Passed to service layer
-await kontentService.migrateContentItem(
+await kontentServiceFixed.migrateContentItem(
   item,
   mappings,
   sourceType,
