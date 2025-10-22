@@ -200,7 +200,7 @@ export class KontentServiceFixed {
       console.log(`🔍 Fetching item data for: ${itemCodename} in language: ${language}`);
       
       // Try to get item from Delivery API with preview mode
-      const response = await this.deliveryClient
+      const response = await this.deliveryClient!
         .item(itemCodename)
         .languageParameter(language)
         .toPromise();
