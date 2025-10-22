@@ -191,6 +191,30 @@ export class KontentServiceFixed {
   }
 
   /**
+   * Get full item data including all elements (for checking references)
+   */
+  async getItemData(itemCodename: string, language: string = 'en'): Promise<any> {
+    await this.ensureInitialized();
+    
+    try {
+      console.log(`🔍 Fetching item data for: ${itemCodename} in language: ${language}`);
+      
+      // Try to get item from Delivery API with preview mode
+      const response = await this.deliveryClient
+        .item(itemCodename)
+        .languageParameter(language)
+        .toPromise();
+      
+      console.log(`✅ Found item: ${itemCodename}`);
+      return response;
+      
+    } catch (error) {
+      console.error(`❌ Failed to fetch item data for ${itemCodename}:`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Complete migration function: creates new content item and language variant with field data
    */
   async migrateContentItem(
@@ -216,16 +240,128 @@ export class KontentServiceFixed {
       
       log('info', `🔄 Starting migration for item: ${sourceItem.name}`);
 
-      // Step 1: Get source content with complete data using Delivery API
+      // Step 1: Get source content with complete data using Delivery API with language fallback
       log('info', '  → Step 1: Fetching source item data...');
-      const sourceItemData = await this.deliveryClient!
-        .item(sourceItem.codename)
-        .depthParameter(1)
-        .languageParameter(sourceLanguage)
-        .toPromise();
+      log('info', `  → Requested language: ${sourceLanguage}`);
+      log('info', `  → Item codename: ${sourceItem.codename}`);
+      
+      let sourceItemData: any;
+      let actualSourceLanguage = sourceLanguage;
+      
+      // Try multiple strategies to get the item
+      try {
+        // Strategy 1: Try requested language with explicit parameter
+        try {
+          sourceItemData = await this.deliveryClient!
+            .item(sourceItem.codename)
+            .depthParameter(1)
+            .languageParameter(sourceLanguage)
+            .toPromise();
+          log('info', `  ✅ Found item in requested language: ${sourceLanguage}`);
+        } catch (langErr: any) {
+          log('warning', `  ⚠️ Strategy 1 failed (language: ${sourceLanguage}): ${langErr.message || 'Unknown error'}`);
+          
+          // Strategy 2: Try without language parameter (uses default)
+          try {
+            sourceItemData = await this.deliveryClient!
+              .item(sourceItem.codename)
+              .depthParameter(1)
+              .toPromise();
+            
+            actualSourceLanguage = sourceItemData.data.item.system.language || 'default';
+            log('info', `  ✅ Strategy 2 success - Found item in fallback language: ${actualSourceLanguage}`);
+            log('info', `  📋 Will copy content from "${actualSourceLanguage}" and create variant in "${sourceLanguage}"`);
+          } catch (defaultErr: any) {
+            // Strategy 3: Try to get ALL languages and pick first available
+            log('warning', `  ⚠️ Strategy 2 failed: ${defaultErr.message || 'Unknown error'}`);
+            log('info', `  → Strategy 3: Trying to fetch item in any available language...`);
+            
+            // Strategy 3: Try other common languages
+            log('info', `  → Trying other languages: de, es, zh...`);
+            const languagesToTry = ['de', 'es', 'zh'];
+            let found = false;
+            
+            for (const lang of languagesToTry) {
+              try {
+                sourceItemData = await this.deliveryClient!
+                  .item(sourceItem.codename)
+                  .depthParameter(1)
+                  .languageParameter(lang)
+                  .toPromise();
+                actualSourceLanguage = sourceItemData.data.item.system.language || lang;
+                log('info', `  ✅ Strategy 3 success - Found item in language: ${actualSourceLanguage}`);
+                log('info', `  📋 Will copy content from "${actualSourceLanguage}" and create variant in "${sourceLanguage}"`);
+                found = true;
+                break;
+              } catch {
+                // Try next language
+                continue;
+              }
+            }
+            
+            if (!found) {
+              // Strategy 4: Try using Management API as last resort
+              log('warning', `  ⚠️ Strategy 3 failed. Trying Strategy 4: Management API...`);
+              try {
+                // Get item from Management API
+                const managementItem = await this.managementClient
+                  .viewContentItem()
+                  .byItemCodename(sourceItem.codename)
+                  .toPromise();
+                
+                // Get the language variant
+                const managementVariant = await this.managementClient
+                  .viewLanguageVariant()
+                  .byItemCodename(sourceItem.codename)
+                  .byLanguageCodename(sourceLanguage)
+                  .toPromise();
+                
+                // Transform Management API format to Delivery API format
+                sourceItemData = {
+                  data: {
+                    item: {
+                      system: {
+                        id: managementItem.data.id,
+                        name: managementItem.data.name,
+                        codename: managementItem.data.codename,
+                        type: managementItem.data.type.codename || managementItem.data.type.id,
+                        language: sourceLanguage
+                      },
+                      elements: {}
+                    }
+                  }
+                };
+                
+                // Transform elements
+                for (const element of managementVariant.data.elements) {
+                  sourceItemData.data.item.elements[element.element.codename] = {
+                    type: element.element.type,
+                    name: element.element.name,
+                    value: element.value
+                  };
+                }
+                
+                actualSourceLanguage = sourceLanguage;
+                log('info', `  ✅ Strategy 4 success - Found item using Management API in language: ${actualSourceLanguage}`);
+                found = true;
+              } catch (mgmtErr: any) {
+                log('error', `  ❌ Strategy 4 failed: ${mgmtErr.message || 'Unknown error'}`);
+              }
+            }
+            
+            if (!found) {
+              throw new Error(`Source item ${sourceItem.codename} not found in any language using any strategy`);
+            }
+          }
+        }
+      } catch (error: any) {
+        const errorMsg = error.message || 'Unknown error';
+        log('error', `  ❌ Failed to fetch source item: ${errorMsg}`);
+        throw new Error(`Source item ${sourceItem.codename} not found: ${errorMsg}`);
+      }
 
-      if (!sourceItemData.data.item) {
-        throw new Error('Source item not found');
+      if (!sourceItemData || !sourceItemData.data || !sourceItemData.data.item) {
+        throw new Error('Source item not found or invalid response');
       }
 
       log('info', `  → Found ${Object.keys(sourceItemData.data.item.elements).length} source elements`);
@@ -394,6 +530,11 @@ export class KontentServiceFixed {
 
       // Step 5: Create language variant with field data using direct approach 
       log('info', `  → Step 5: Creating language variant with ${elements.length} elements...`);
+      if (actualSourceLanguage !== sourceLanguage) {
+        log('info', `  📋 Creating variant in "${sourceLanguage}" using content from "${actualSourceLanguage}"`);
+      } else {
+        log('info', `  📋 Creating variant in "${sourceLanguage}"`);
+      }
       
       // Prepare elements in the correct format expected by the API
       const elementsData = elements.map(elementData => {
@@ -450,42 +591,9 @@ export class KontentServiceFixed {
         }
       });
       
-      // Pre-process linked items for migration if needed
-      let processedElements = [...elementsData];
-      
-      const linkedElement = elementsData.find(e => e.element.codename === 'parent_page_type_tag');
-      if (linkedElement && Array.isArray(linkedElement.value) && linkedElement.value.length > 0) {
-        log('info', '    • Pre-processing linked items for migration...');
-        
-        const linkedReferences = [];
-        for (const item of linkedElement.value) {
-          const codename = item.codename || item;
-          log('info', `      • Processing linked item: ${codename}`);
-          
-          // Check if this linked item should also be migrated
-          const migratedCodename = await this.handleLinkedItemMigration(
-            codename,
-            sourceContentType,
-            targetContentType,
-            sourceLanguage
-          );
-          
-          linkedReferences.push({ codename: migratedCodename });
-        }
-        
-        // Update the element data with migrated references
-        const updatedLinkedElement = {
-          ...linkedElement,
-          value: linkedReferences
-        };
-        
-        // Replace the element in the array
-        processedElements = processedElements.map(el => 
-          el.element.codename === 'parent_page_type_tag' ? updatedLinkedElement : el
-        );
-        
-        log('success', `    ✅ Updated ${linkedReferences.length} linked references`);
-      }
+      // NOTE: We do NOT pre-process linked items here because referenced items may not exist yet.
+      // References will be updated later in the "Update references" phase after ALL items are migrated.
+      log('info', '    ℹ️ Skipping linked items during initial creation - will be added in reference update phase');
       
       const newVariant = await this.managementClient
         .upsertLanguageVariant()
@@ -495,7 +603,7 @@ export class KontentServiceFixed {
           const elements = [];
           
           // Add name element
-          const nameElement = processedElements.find(e => e.element.codename === 'name');
+          const nameElement = elementsData.find(e => e.element.codename === 'name');
           if (nameElement) {
             elements.push(builder.textElement({
               element: { codename: 'name' },
@@ -503,14 +611,8 @@ export class KontentServiceFixed {
             }));
           }
           
-          // Add linked items element if it has values
-          const processedLinkedElement = processedElements.find(e => e.element.codename === 'parent_page_type_tag');
-          if (processedLinkedElement && Array.isArray(processedLinkedElement.value) && processedLinkedElement.value.length > 0) {
-            elements.push(builder.linkedItemsElement({
-              element: { codename: 'parent_page_type_tag' },
-              value: processedLinkedElement.value
-            }));
-          }
+          // Do NOT add linked items here - they will be added in the reference update phase
+          // This prevents errors when the referenced items haven't been created yet
           
           // Return in the format expected by the API: {elements: [...]}
           return {
@@ -657,12 +759,66 @@ export class KontentServiceFixed {
   ): Promise<string> {
     await this.ensureInitialized();
     try {
-      // Step 1: Get the referenced item details
+      // Step 1: Get the referenced item details with language fallback
       console.log(`🔍 Checking if ${referencedCodename} needs migration...`);
+      console.log(`📍 Requested language: ${sourceLanguage}`);
       
-      const referencedItem = await this.deliveryClient!
-        .item(referencedCodename)
-        .toPromise();
+      // Try to get item in the requested language, with fallback to any available language
+      let referencedItem: any;
+      let actualLanguage = sourceLanguage;
+      
+      // Try multiple strategies to get the item
+      try {
+        // Strategy 1: Try requested language
+        try {
+          referencedItem = await this.deliveryClient!
+            .item(referencedCodename)
+            .languageParameter(sourceLanguage)
+            .toPromise();
+          console.log(`✅ Found item in requested language: ${sourceLanguage}`);
+        } catch (langErr: any) {
+          console.log(`⚠️ Strategy 1 failed (language: ${sourceLanguage}): ${langErr.message || 'Unknown error'}`);
+          
+          // Strategy 2: Try default language
+          try {
+            referencedItem = await this.deliveryClient!
+              .item(referencedCodename)
+              .toPromise();
+            
+            actualLanguage = referencedItem.data.item.system.language || 'default';
+            console.log(`✅ Strategy 2 success - Found item in fallback language: ${actualLanguage}`);
+          } catch (defaultErr: any) {
+            console.log(`⚠️ Strategy 2 failed: ${defaultErr.message || 'Unknown error'}`);
+            
+            // Strategy 3: Try other common languages
+            const languagesToTry = ['de', 'es', 'zh'];
+            let found = false;
+            
+            for (const lang of languagesToTry) {
+              try {
+                referencedItem = await this.deliveryClient!
+                  .item(referencedCodename)
+                  .languageParameter(lang)
+                  .toPromise();
+                actualLanguage = referencedItem.data.item.system.language || lang;
+                console.log(`✅ Strategy 3 success - Found item in language: ${actualLanguage}`);
+                found = true;
+                break;
+              } catch {
+                continue;
+              }
+            }
+            
+            if (!found) {
+              throw new Error(`Item ${referencedCodename} not found in any language (${sourceLanguage}, de, es, zh, default)`);
+            }
+          }
+        }
+      } catch (error: any) {
+        const errorMsg = error.message || 'Unknown error';
+        console.error(`❌ Failed to fetch linked item: ${errorMsg}`);
+        throw new Error(`Item ${referencedCodename} not found: ${errorMsg}`);
+      }
 
       // Step 2: Check if the referenced item is of the same type that we're migrating
       if (referencedItem.data.item.system.type === sourceContentType.codename) {
@@ -743,33 +899,20 @@ export class KontentServiceFixed {
         
         // Only create variant if it doesn't already exist
         if (shouldCreateVariant) {
-          console.log(`🔧 Creating language variant for migrated item...`);
+          console.log(`🔧 Creating language variant for migrated item in "${sourceLanguage}"...`);
+          console.log(`📋 Copying content from available language: "${actualLanguage}"`);
           
-          // Pre-process parent references recursively BEFORE creating the variant
-          let parentReferences: any[] = [];
-          const originalParentField = referencedItem.data.item.elements.parent_tag;
-          if (originalParentField && Array.isArray(originalParentField.value) && originalParentField.value.length > 0) {
-            console.log(`🔗 Processing parent references for ${migratedCodename}:`, originalParentField.value);
-            
-            // Recursively migrate parent references
-            for (const parentCodename of originalParentField.value) {
-              console.log(`🔄 Recursively migrating parent: ${parentCodename}`);
-              const migratedParentCodename = await this.handleLinkedItemMigration(
-                parentCodename,
-                sourceContentType,
-                targetContentType,
-                sourceLanguage
-              );
-              parentReferences.push({ codename: migratedParentCodename });
-            }
-            
-            console.log(`✅ Migrated parent references:`, parentReferences);
-          }
+          // NOTE: We do NOT add parent references here because the parent items may not exist yet.
+          // References will be updated later in the "Update references" phase after ALL items are migrated.
+          console.log(`⏭️ Skipping parent references during initial creation - will be added in reference update phase`);
+          
+          // Get language ID for the REQUESTED language (where we want to create the variant)
+          const targetLanguageId = await this.getLanguageId(sourceLanguage);
           
           const migratedVariant = await this.managementClient
             .upsertLanguageVariant()
             .byItemId(newMigratedItem.data.id)
-            .byLanguageId(languageId)
+            .byLanguageId(targetLanguageId)
             .withData((builder: any) => {
               const elements = [];
               
@@ -780,13 +923,8 @@ export class KontentServiceFixed {
                 value: originalName
               }));
               
-              // Add parent references if they exist
-              if (parentReferences.length > 0) {
-                elements.push(builder.linkedItemsElement({
-                  element: { codename: 'parent_page_type_tag' },
-                  value: parentReferences
-                }));
-              }
+              // Do NOT add parent references here - they will be added in the reference update phase
+              // This prevents errors when the parent items haven't been created yet
               
               return { elements: elements };
             })
@@ -990,7 +1128,7 @@ export class KontentServiceFixed {
       console.log(`� Field ID for ${fieldCodename}: ${fieldId}`);
 
       // Step 4: Get current language variant with fallback to default
-      const { variant, actualLanguage } = await this.getLanguageVariantWithFallback(itemCodename, languageCodename);
+      let { variant, actualLanguage } = await this.getLanguageVariantWithFallback(itemCodename, languageCodename);
 
       // Skip if variant not found in any language
       if (!variant) {
@@ -1002,14 +1140,62 @@ export class KontentServiceFixed {
         throw new Error(`Language variant not found for ${itemCodename} in ${actualLanguage}`);
       }
 
-      // IMPORTANT: Only update if variant is in the requested language
-      // Skip items that only exist in default language when migrating to other languages
+      // If variant doesn't exist in the requested language, create it first
       if (actualLanguage !== languageCodename) {
-        console.warn(`⏭️ Skipping reference update in "${itemCodename}" - item only exists in ${actualLanguage}, not in ${languageCodename}`);
-        return { 
-          success: false, 
-          error: `Item only exists in ${actualLanguage}, not in migration language ${languageCodename}` 
-        };
+        console.warn(`⚠️ Item "${itemCodename}" only exists in ${actualLanguage}, not in ${languageCodename}`);
+        console.log(`📝 Creating language variant in ${languageCodename} before updating reference...`);
+        
+        try {
+          // Get the language ID for the migration language
+          const targetLanguageId = await this.getLanguageId(languageCodename);
+          
+          // Get the item ID
+          const item = await this.managementClient
+            .viewContentItem()
+            .byItemCodename(itemCodename)
+            .toPromise();
+          
+          // Create an empty variant in the target language by copying the default variant
+          const defaultVariant = variant.data;
+          const elementsToCreate: any[] = [];
+          
+          // Copy elements from default variant
+          for (const element of defaultVariant.elements) {
+            elementsToCreate.push({
+              element: { id: element.element.id },
+              value: element.value
+            });
+          }
+          
+          // Create the new language variant
+          await this.managementClient
+            .upsertLanguageVariant()
+            .byItemId(item.data.id)
+            .byLanguageId(targetLanguageId)
+            .withData(() => ({
+              elements: elementsToCreate
+            }))
+            .toPromise();
+          
+          console.log(`✅ Created language variant in ${languageCodename} for item ${itemCodename}`);
+          
+          // Now get the newly created variant
+          variant = await this.managementClient
+            .viewLanguageVariant()
+            .byItemCodename(itemCodename)
+            .byLanguageCodename(languageCodename)
+            .toPromise();
+          
+          actualLanguage = languageCodename;
+          
+        } catch (createError) {
+          const errorMsg = createError instanceof Error ? createError.message : 'Unknown error';
+          console.error(`❌ Failed to create language variant: ${errorMsg}`);
+          return { 
+            success: false, 
+            error: `Failed to create language variant in ${languageCodename}: ${errorMsg}` 
+          };
+        }
       }
 
       console.log(`📝 Working with language variant: ${actualLanguage}`);
@@ -1036,6 +1222,20 @@ export class KontentServiceFixed {
         throw new Error(`Could not find old item ${oldReference}: ${errorMsg}`);
       }
 
+      // Step 6.5: Get the ID of the new item (by codename)
+      let newItemId: string;
+      try {
+        const newItem = await this.managementClient
+          .viewContentItem()
+          .byItemCodename(newReference)
+          .toPromise();
+        newItemId = newItem.data.id;
+        console.log(`🔍 New item ${newReference} has ID: ${newItemId}`);
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+        throw new Error(`Could not find new item ${newReference}: ${errorMsg}`);
+      }
+
       // Step 7: Update the value - replace old reference ID with new one
       let updatedValue = fieldElement.value;
       
@@ -1046,7 +1246,7 @@ export class KontentServiceFixed {
           const refId = typeof ref === 'object' && ref.id ? ref.id : ref;
           
           if (refId === oldItemId) {
-            return { id: newReference };  // newReference is already an ID
+            return { id: newItemId };  // Use the new item's ID
           }
           return typeof ref === 'object' ? ref : { id: ref };
         });
@@ -1059,26 +1259,29 @@ export class KontentServiceFixed {
       console.log(`  Updated value:`, updatedValue);
 
       // Step 8: Check if the item is published, if so create a new version first
+      // IMPORTANT: Always use the TARGET language (languageCodename), not actualLanguage
+      // because we just created the variant in that language
       try {
         // Try to create a new version (this will fail if already in draft)
         await this.managementClient
           .createNewVersionOfLanguageVariant()
           .byItemCodename(itemCodename)
-          .byLanguageCodename(actualLanguage)
+          .byLanguageCodename(languageCodename) // Use target language
           .toPromise();
-        console.log(`📝 Created new draft version of ${itemCodename}`);
+        console.log(`📝 Created new draft version of ${itemCodename} in ${languageCodename}`);
       } catch (err) {
         // Item is already in draft state, or error creating version
         const errMsg = err instanceof Error ? err.message : 'Unknown';
-        console.log(`ℹ️  Item already in draft state or error creating version: ${errMsg}, continuing...`);
+        console.log(`ℹ️  Item already in draft state or error creating version in ${languageCodename}: ${errMsg}, continuing...`);
       }
 
       // Step 9: Update the language variant - ONLY send the element we're updating
       // The Management API allows partial updates, we don't need to send all elements
+      // IMPORTANT: Use languageCodename (target language) to ensure we update the correct variant
       await this.managementClient
         .upsertLanguageVariant()
         .byItemCodename(itemCodename)
-        .byLanguageCodename(actualLanguage)
+        .byLanguageCodename(languageCodename) // Use target language, not actualLanguage
         .withData(() => ({
           elements: [
             {
@@ -1091,7 +1294,7 @@ export class KontentServiceFixed {
         }))
         .toPromise();
 
-      console.log(`✅ Successfully updated reference in ${itemCodename} (item is now in draft state)`);
+      console.log(`✅ Successfully updated reference in ${itemCodename} language variant: ${languageCodename} (item is now in draft state)`);
       
       return { 
         success: true 

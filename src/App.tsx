@@ -56,6 +56,7 @@ export default function App() {
   const [migrationProgress, setMigrationProgress] = useState(0);
   const [currentMigrationStep, setCurrentMigrationStep] = useState<string>('');
   const [draftItems, setDraftItems] = useState<any[]>([]);
+  const [updatedReferenceItems, setUpdatedReferenceItems] = useState<Set<string>>(new Set());
   
   const { contentTypes, isLoading: typesLoading, error: typesError } = useContentTypes();
   const { 
@@ -118,9 +119,11 @@ export default function App() {
   const handleContinueToMigration = (data: { updateIncomingReferences: boolean; relationships: any[] }) => {
     console.log('🚀 Moving to migration execution');
     console.log('📊 Update incoming references:', data.updateIncomingReferences);
-    console.log('📊 Relationships:', data.relationships.length);
+    console.log('📊 Relationships received:', data.relationships.length);
+    console.log('📊 Full relationships data:', data.relationships);
     setUpdateIncomingReferences(data.updateIncomingReferences);
     setItemRelationships(data.relationships);
+    console.log('✅ itemRelationships state updated');
     setStep(5);
   };
 
@@ -481,30 +484,57 @@ export default function App() {
     // Sheet 5: Incoming References (if applicable)
     if (updateIncomingReferences && Array.isArray(itemRelationships) && itemRelationships.length > 0) {
       const referencesData: any[] = [
-        ['Migrated Item', 'Migrated Item Codename', 'Referenced From Item', 'Referenced From Type', 'Field Name']
+        ['Migrated Item', 'Migrated Item Codename', 'Referenced From Item', 'Referenced From Codename', 'Referenced From Type', 'Field Modified', 'Item URL', 'Was Updated']
       ];
+      
+      // Get project ID for building URLs
+      const projectId = import.meta.env.VITE_KONTENT_PROJECT_ID || '';
       
       itemRelationships.forEach(rel => {
         if (rel.incomingRelationships && Array.isArray(rel.incomingRelationships) && rel.incomingRelationships.length > 0) {
           rel.incomingRelationships.forEach((ref: any) => {
+            // Build the Kontent.ai item URL with collection ID and variant ID
+            // Collection can be a UUID or 'default' string - convert 'default' to the default collection UUID
+            const collectionId = ref.fromItemCollection === 'default' 
+              ? '00000000-0000-0000-0000-000000000000' 
+              : (ref.fromItemCollection || '00000000-0000-0000-0000-000000000000');
+            
+            // Build URL with variant ID if available, otherwise fallback to simpler format
+            const itemUrl = projectId && ref.fromItemLanguageVariantId
+              ? `https://app.kontent.ai/${projectId}/content-inventory/${collectionId}/${ref.fromItemLanguageVariantId}/content/${ref.fromItemId}`
+              : projectId
+              ? `https://app.kontent.ai/${projectId}/content-inventory/${collectionId}/${ref.fromItemId}/content`
+              : 'N/A';
+            
+            // Check if this item was updated (it's in the updatedReferenceItems set)
+            const wasUpdated = updatedReferenceItems.has(ref.fromItemId) ? 'Yes' : 'No';
+            
             referencesData.push([
               rel.itemName,
               rel.itemCodename,
               ref.fromItemName,
+              ref.fromItemCodename,
               ref.fromItemType,
-              ref.fieldName
+              ref.fieldName,
+              itemUrl,
+              wasUpdated
             ]);
           });
         }
       });
       
       const referencesSheet = XLSX.utils.aoa_to_sheet(referencesData);
+      
+      // Set column widths
       referencesSheet['!cols'] = [
-        { wch: 30 },
-        { wch: 25 },
-        { wch: 30 },
-        { wch: 25 },
-        { wch: 25 }
+        { wch: 30 },  // Migrated Item
+        { wch: 25 },  // Migrated Item Codename
+        { wch: 30 },  // Referenced From Item
+        { wch: 25 },  // Referenced From Codename
+        { wch: 25 },  // Referenced From Type
+        { wch: 25 },  // Field Modified
+        { wch: 70 },  // Item URL (wider for full URL)
+        { wch: 12 }   // Was Updated
       ];
       
       XLSX.utils.book_append_sheet(workbook, referencesSheet, 'Incoming References');
@@ -549,6 +579,12 @@ export default function App() {
   const handleExecuteMigration = async () => {
     if (!migrationConfig) return;
 
+    // CRITICAL DEBUG - This should ALWAYS show
+    console.log('🚀 === MIGRATION EXECUTION STARTED ===');
+    console.log('📊 Selected items:', selectedItems.length, selectedItems);
+    console.log('📊 Item relationships:', itemRelationships.length, itemRelationships);
+    console.log('📊 Update incoming references:', updateIncomingReferences);
+
     try {
       setMigrationInProgress(true);
       setMigrationLogs([]);
@@ -557,8 +593,88 @@ export default function App() {
       addLog('info', '🚀 Starting migration process...');
       setCurrentMigrationStep('Initializing migration');
       
+      addLog('info', '🚀 Starting migration execution...');
+      addLog('info', `📊 Selected items: ${selectedItems.length}`);
+      addLog('info', `📊 Item relationships available: ${itemRelationships.length}`);
+      addLog('info', `📊 Update incoming references: ${updateIncomingReferences}`);
+      
       const results = [];
-      const totalItems = selectedItems.length;
+      const migratedItemsMap = new Map<string, string>(); // oldCodename -> newItemId
+      
+      // Build list of items to migrate, including auto-discovered related items
+      const itemsToMigrate = new Set<string>(); // Set of item IDs
+      const itemsById = new Map<string, any>(); // Map ID -> item object
+      
+      // Add selected items
+      selectedItems.forEach(item => {
+        itemsToMigrate.add(item.id);
+        itemsById.set(item.id, item);
+        addLog('info', `  ✓ Added to migration: ${item.name} (${item.codename})`);
+      });
+      
+      // Analyze incoming relationships to find items that need auto-migration
+      // These are items of the SAME SOURCE TYPE that reference items being migrated
+      const sourceTypeCodename = migrationConfig.sourceContentType.codename;
+      const autoMigrateItems: any[] = [];
+      
+      addLog('info', `🔍 Analyzing relationships for auto-migration...`);
+      addLog('info', `📋 Source type: ${sourceTypeCodename}`);
+      addLog('info', `📋 Relationships to check: ${itemRelationships.length}`);
+      
+      for (const relationship of itemRelationships) {
+        addLog('info', `  → Checking relationships for: ${relationship.itemName} (${relationship.itemCodename})`);
+        addLog('info', `    Incoming: ${relationship.incomingRelationships.length}, Outgoing: ${relationship.outgoingRelationships?.length || 0}`);
+        
+        // Only process if this item is being migrated
+        if (!itemsToMigrate.has(relationship.itemId)) {
+          addLog('info', `    ⏭️ Skipping - item not in migration list`);
+          continue;
+        }
+        
+        for (const incomingRef of relationship.incomingRelationships) {
+          addLog('info', `    → Incoming ref from: ${incomingRef.fromItemName} (type: ${incomingRef.fromItemType})`);
+          
+          // Check if the referencing item is of the same source type
+          if (incomingRef.fromItemType === sourceTypeCodename) {
+            // This item needs to be auto-migrated to maintain relationships
+            if (!itemsToMigrate.has(incomingRef.fromItemId)) {
+              addLog('info', `🔗 Auto-discovered related item: ${incomingRef.fromItemName}`, 
+                `Will auto-migrate because it references migrated item of same type`);
+              
+              // Add to migration list
+              itemsToMigrate.add(incomingRef.fromItemId);
+              autoMigrateItems.push({
+                id: incomingRef.fromItemId,
+                name: incomingRef.fromItemName,
+                codename: incomingRef.fromItemCodename,
+                type: incomingRef.fromItemType,
+                autoMigrated: true,
+              });
+              itemsById.set(incomingRef.fromItemId, {
+                id: incomingRef.fromItemId,
+                name: incomingRef.fromItemName,
+                codename: incomingRef.fromItemCodename,
+                type: incomingRef.fromItemType,
+              });
+            } else {
+              addLog('info', `    ✓ Already in migration list: ${incomingRef.fromItemName}`);
+            }
+          } else {
+            addLog('info', `    ⏭️ Different type: ${incomingRef.fromItemType} !== ${sourceTypeCodename}`);
+          }
+        }
+      }
+      
+      if (autoMigrateItems.length > 0) {
+        addLog('info', `📋 Auto-migration list: ${autoMigrateItems.length} additional items`, 
+          autoMigrateItems.map(i => i.name).join(', '));
+      }
+      
+      const allItemsToMigrate = Array.from(itemsToMigrate).map(id => itemsById.get(id));
+      const totalItems = allItemsToMigrate.length;
+      
+      addLog('info', `📊 Total items to migrate: ${totalItems}`, 
+        `Selected: ${selectedItems.length}, Auto-discovered: ${autoMigrateItems.length}`);
       
       // Calculate total steps: migration items + reference updates (if enabled)
       const totalReferences = updateIncomingReferences 
@@ -568,10 +684,11 @@ export default function App() {
       let completedSteps = 0;
       
       for (let i = 0; i < totalItems; i++) {
-        const item = selectedItems[i];
-        setCurrentMigrationStep(`Migrating item ${i + 1} of ${totalItems}: ${item.name}`);
+        const item = allItemsToMigrate[i];
+        const isAutoMigrated = autoMigrateItems.some(a => a.id === item.id);
+        setCurrentMigrationStep(`Migrating item ${i + 1} of ${totalItems}: ${item.name}${isAutoMigrated ? ' (auto)' : ''}`);
         
-        addLog('info', `📝 Migrating item ${i + 1}/${totalItems}`, item.name);
+        addLog('info', `📝 Migrating item ${i + 1}/${totalItems}${isAutoMigrated ? ' 🔗 (auto-discovered)' : ''}`, item.name);
         
         try {
           // Transform field mappings to the expected format
@@ -598,10 +715,18 @@ export default function App() {
             addLog('success', `✅ Successfully migrated "${item.name}"`, 
               `New item ID: ${migrationResult.newItem?.id || 'unknown'}`);
             
+            // Track migrated items for reference updates
+            // Store mapping: old_codename -> new_migrated_codename
+            const newCodename = migrationResult.newItem?.codename || `${item.codename}_migrated`;
+            migratedItemsMap.set(item.codename, newCodename);
+            
+            addLog('info', `  → Mapped ${item.codename} → ${newCodename}`);
+            
             results.push({
               sourceItem: item,
               status: 'success',
               newItemId: migrationResult.newItem?.id || 'unknown',
+              newItemCodename: newCodename,
               message: `Successfully migrated "${item.name}" from ${migrationConfig.sourceContentType.name} to ${migrationConfig.targetContentType.name}`,
               timestamp: new Date(),
               createdItems: migrationResult.createdItems || [],
@@ -639,13 +764,93 @@ export default function App() {
         setMigrationProgress(progress);
       }
       
-      // Track which items had their references successfully updated
-      const updatedReferenceItems = new Set<string>();
+      // Reset the updated reference items tracking
+      const updatedItemsSet = new Set<string>();
       
-      // Update incoming references if enabled
+      // PHASE 1: Update OUTGOING references (references within each migrated item)
+      // For each migrated item, update its internal references to point to migrated versions
+      if (updateIncomingReferences && migratedItemsMap.size > 0) {
+        setCurrentMigrationStep('Updating outgoing references in migrated items');
+        addLog('info', '🔗 Phase 1: Updating outgoing references (references within migrated items)...');
+        addLog('info', `📋 Migrated items map: ${migratedItemsMap.size} items`, 
+          Array.from(migratedItemsMap.entries()).map(([old, newC]) => `${old} → ${newC}`).join(', '));
+        
+        for (const result of results) {
+          if (result.status !== 'success') continue;
+          
+          const migratedItemCodename = result.newItemCodename;
+          const originalItemCodename = result.sourceItem.codename;
+          
+          addLog('info', `🔍 Checking outgoing references for: ${migratedItemCodename} [was: ${originalItemCodename}]`);
+          
+          try {
+            // Fetch the original item's data to see what it references
+            const originalItemData = await kontentServiceFixed.getItemData(originalItemCodename, selectedLanguage);
+            
+            if (!originalItemData?.data?.item?.elements) {
+              addLog('warning', `  ⚠️ Could not fetch original item data for ${originalItemCodename}`);
+              continue;
+            }
+            
+            // Find all modular_content fields in the original item
+            const elements = originalItemData.data.item.elements;
+            let referencesUpdated = 0;
+            
+            for (const [fieldName, fieldData] of Object.entries(elements)) {
+              const typedFieldData = fieldData as any;
+              if (typedFieldData.type === 'modular_content' && Array.isArray(typedFieldData.value)) {
+                // Check each reference in this field
+                for (const referencedCodename of typedFieldData.value) {
+                  // If this referenced item was also migrated, update the reference
+                  const migratedRefCodename = migratedItemsMap.get(referencedCodename);
+                  
+                  if (migratedRefCodename) {
+                    addLog('info', `  → Updating outgoing reference in ${migratedItemCodename}.${fieldName}`, 
+                      `${referencedCodename} → ${migratedRefCodename}`);
+                    
+                    const updateResult = await kontentServiceFixed.updateItemReference(
+                      migratedItemCodename,     // Item to update
+                      fieldName,                // Field name
+                      referencedCodename,       // Old reference (original)
+                      migratedRefCodename,      // New reference (migrated)
+                      selectedLanguage
+                    );
+                    
+                    if (updateResult.success) {
+                      addLog('success', `  ✅ Updated outgoing reference successfully`);
+                      referencesUpdated++;
+                    } else {
+                      addLog('error', `  ❌ Failed to update outgoing reference`, updateResult.error || 'Unknown error');
+                    }
+                  }
+                }
+              }
+            }
+            
+            if (referencesUpdated > 0) {
+              addLog('success', `✅ Updated ${referencesUpdated} outgoing reference(s) in ${migratedItemCodename}`);
+            } else {
+              addLog('info', `  ℹ️ No outgoing references to update in ${migratedItemCodename}`);
+            }
+            
+          } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+            addLog('error', `❌ Failed to process outgoing references for ${migratedItemCodename}`, errorMsg);
+          }
+          
+          // Update progress
+          completedSteps++;
+          const progress = (completedSteps / totalSteps) * 100;
+          setMigrationProgress(progress);
+        }
+      }
+      
+      // PHASE 2: Update INCOMING references (references from other migrated items)
+      // IMPORTANT: Only update references BETWEEN MIGRATED ITEMS (same source type)
+      // Do NOT update references in items of different types or non-migrated items
       if (updateIncomingReferences && itemRelationships.length > 0) {
-        setCurrentMigrationStep('Updating incoming references');
-        addLog('info', '🔄 Updating incoming references...');
+        setCurrentMigrationStep('Updating incoming references in migrated items');
+        addLog('info', '🔗 Phase 2: Updating incoming references (references from other migrated items)...');
         
         for (const relationship of itemRelationships) {
           if (relationship.incomingRelationships.length === 0) continue;
@@ -658,47 +863,68 @@ export default function App() {
             continue;
           }
           
-          const newItemId = migrationResult.newItemId;
+          const newMigratedCodename = migrationResult.newItemCodename;
           const oldItemCodename = relationship.itemCodename;
           
-          // IMPORTANT: Filter out incoming references from items of the SAME SOURCE TYPE
-          // We only want to update references in items of the TARGET TYPE or other different types
-          const sourceTypeCodename = migrationConfig?.sourceContentType.codename;
-          const filteredIncomingRefs = relationship.incomingRelationships.filter((ref: any) => {
+          addLog('info', `🔗 Processing references for migrated item: ${oldItemCodename} → ${newMigratedCodename}`);
+          
+          // Filter to ONLY update references from OTHER MIGRATED ITEMS of the same source type
+          const sourceTypeCodename = migrationConfig.sourceContentType.codename;
+          const referencesToUpdate = relationship.incomingRelationships.filter((ref: any) => {
+            // Only update if referencing item is of the same source type
             const isSameSourceType = ref.fromItemType === sourceTypeCodename;
-            if (isSameSourceType) {
-              addLog('info', `  ⏭️ Skipping reference from ${ref.fromItemName} (same source type: ${sourceTypeCodename})`);
+            // AND if that item was also migrated
+            const wasAlsoMigrated = migratedItemsMap.has(ref.fromItemCodename);
+            
+            if (!isSameSourceType) {
+              addLog('info', `  ⏭️ Skipping ${ref.fromItemName} (different type: ${ref.fromItemType})`);
+              return false;
             }
-            return !isSameSourceType;
+            
+            if (!wasAlsoMigrated) {
+              addLog('info', `  ⏭️ Skipping ${ref.fromItemName} (not migrated, keeping original reference)`);
+              return false;
+            }
+            
+            return true;
           });
           
-          if (filteredIncomingRefs.length === 0) {
-            addLog('info', `⏭️ No references to update for ${relationship.itemName} (all were from source type)`);
+          if (referencesToUpdate.length === 0) {
+            addLog('info', `⏭️ No migrated items reference ${newMigratedCodename}`);
             continue;
           }
           
-          addLog('info', `📝 Updating ${filteredIncomingRefs.length} incoming references (filtered from ${relationship.incomingRelationships.length} total)`, 
-            `For item: ${relationship.itemName}`);
+          addLog('info', `📝 Updating ${referencesToUpdate.length} references in migrated items`, 
+            `From: ${oldItemCodename} → To: ${newMigratedCodename}`);
           
-          for (const incomingRef of filteredIncomingRefs) {
+          for (const incomingRef of referencesToUpdate) {
             try {
-              addLog('info', `  → Updating reference in ${incomingRef.fromItemName} [${incomingRef.fromItemType}]`, 
-                `Field: ${incomingRef.fieldName}`);
+              const needsVariant = incomingRef.needsLanguageVariant || false;
+              const migratedRefItemCodename = migratedItemsMap.get(incomingRef.fromItemCodename);
               
-              // Use the new updateItemReference function
+              if (!migratedRefItemCodename) {
+                addLog('error', `  ❌ Could not find migrated version of ${incomingRef.fromItemCodename}`);
+                continue;
+              }
+              
+              addLog('info', `  → Updating reference in MIGRATED item: ${migratedRefItemCodename} [was: ${incomingRef.fromItemCodename}]`, 
+                `Field: ${incomingRef.fieldName}${needsVariant ? ` (will create ${selectedLanguage} variant)` : ''}`);
+              
+              // Update reference in the MIGRATED item (not the original)
+              // Pass CODENAMES (not IDs) - the function will handle ID conversion
               const updateResult = await kontentServiceFixed.updateItemReference(
-                incomingRef.fromItemCodename,
-                incomingRef.fieldName,
-                oldItemCodename,
-                newItemId,
+                migratedRefItemCodename, // MIGRATED item codename (where to update)
+                incomingRef.fieldName,   // Field name
+                oldItemCodename,         // Old reference codename (original item)
+                newMigratedCodename,     // New reference codename (migrated item)
                 selectedLanguage
               );
               
               if (updateResult.success) {
-                addLog('success', `  ✅ Successfully updated reference`, 
-                  `In item: ${incomingRef.fromItemName}`);
+                addLog('success', `  ✅ Successfully updated reference in migrated item`, 
+                  `Item: ${migratedRefItemCodename}, now references: ${newMigratedCodename}`);
                 // Track this item as having been updated
-                updatedReferenceItems.add(incomingRef.fromItemId);
+                updatedItemsSet.add(incomingRef.fromItemId);
               } else {
                 addLog('error', `  ❌ Failed to update reference`, 
                   updateResult.error || 'Unknown error');
@@ -716,9 +942,86 @@ export default function App() {
         }
       }
       
+      // PHASE 3: Update references in items of DIFFERENT types (e.g., pages referencing migrated tags)
+      // Update ALL incoming references to point to the migrated versions
+      if (updateIncomingReferences && itemRelationships.length > 0) {
+        setCurrentMigrationStep('Updating references in external items (different types)');
+        addLog('info', '🔗 Phase 3: Updating references in external items (items of different types)...');
+        
+        for (const relationship of itemRelationships) {
+          if (relationship.incomingRelationships.length === 0) continue;
+          
+          // Find the migration result for this item
+          const migrationResult = results.find(r => r.sourceItem.id === relationship.itemId);
+          if (!migrationResult || migrationResult.status !== 'success') {
+            continue;
+          }
+          
+          const newMigratedCodename = migrationResult.newItemCodename;
+          const oldItemCodename = relationship.itemCodename;
+          
+          // Filter to ONLY update references from items of DIFFERENT types
+          const sourceTypeCodename = migrationConfig.sourceContentType.codename;
+          const externalReferences = relationship.incomingRelationships.filter((ref: any) => {
+            // Only update if referencing item is of a DIFFERENT type
+            const isDifferentType = ref.fromItemType !== sourceTypeCodename;
+            
+            if (!isDifferentType) {
+              // Skip - already handled in Phase 2
+              return false;
+            }
+            
+            return true;
+          });
+          
+          if (externalReferences.length === 0) {
+            continue;
+          }
+          
+          addLog('info', `📝 Updating ${externalReferences.length} external references to ${newMigratedCodename}`, 
+            `From items of different types`);
+          
+          for (const incomingRef of externalReferences) {
+            try {
+              addLog('info', `  → Updating reference in EXTERNAL item: ${incomingRef.fromItemName} (${incomingRef.fromItemType})`, 
+                `Field: ${incomingRef.fieldName}, ${oldItemCodename} → ${newMigratedCodename}`);
+              
+              // Update reference in the ORIGINAL external item (not migrated because it's a different type)
+              const updateResult = await kontentServiceFixed.updateItemReference(
+                incomingRef.fromItemCodename, // External item codename (where to update)
+                incomingRef.fieldName,        // Field name
+                oldItemCodename,              // Old reference codename (original item)
+                newMigratedCodename,          // New reference codename (migrated item)
+                selectedLanguage
+              );
+              
+              if (updateResult.success) {
+                addLog('success', `  ✅ Successfully updated external reference`, 
+                  `Item: ${incomingRef.fromItemName}, now references: ${newMigratedCodename}`);
+                updatedItemsSet.add(incomingRef.fromItemId);
+              } else {
+                addLog('error', `  ❌ Failed to update external reference`, 
+                  updateResult.error || 'Unknown error');
+              }
+            } catch (refError) {
+              const errorMsg = refError instanceof Error ? refError.message : 'Unknown error';
+              addLog('error', `Failed to update external reference in ${incomingRef.fromItemName}`, errorMsg);
+            }
+            
+            // Update progress after each reference update
+            completedSteps++;
+            const progress = (completedSteps / totalSteps) * 100;
+            setMigrationProgress(progress);
+          }
+        }
+      }
+      
       setMigrationProgress(100);
       setCurrentMigrationStep('Migration completed');
       setMigrationResults(results);
+      
+      // Save the updated reference items to state for Excel report
+      setUpdatedReferenceItems(updatedItemsSet);
       
       // Collect all draft items created during migration (avoid duplicates)
       const allDraftItems: any[] = [];
@@ -762,7 +1065,7 @@ export default function App() {
               const refItemId = ref.fromItemId;
               
               // Skip if not in the updated items set (not actually updated)
-              if (!updatedReferenceItems.has(refItemId)) {
+              if (!updatedItemsSet.has(refItemId)) {
                 return;
               }
               
@@ -796,7 +1099,6 @@ export default function App() {
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
       addLog('error', '💥 Migration failed', errorMsg);
-      alert(`Migration failed: ${errorMsg}`);
     } finally {
       setMigrationInProgress(false);
     }

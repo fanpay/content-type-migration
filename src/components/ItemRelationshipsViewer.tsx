@@ -18,8 +18,12 @@ interface IncomingRelationship {
   fromItemName: string;
   fromItemCodename: string;
   fromItemType: string;
+  fromItemCollection?: string; // Collection ID of the referencing item
+  fromItemLanguageVariantId?: string; // Language variant ID for building correct URLs
   fieldName: string;
   fromItemUrl?: string;
+  language?: string; // Language where this item exists
+  needsLanguageVariant?: boolean; // True if language variant needs to be created
 }
 
 interface ItemRelationship {
@@ -103,13 +107,14 @@ export function ItemRelationshipsViewer({
             }
           });
 
-          // Use Delivery API's itemUsedIn endpoint with language filter
-          // IMPORTANT: Use system.language[in] parameter to filter by language
+          // Use Delivery API's itemUsedIn endpoint to find ALL items that reference this item
+          // IMPORTANT: We don't filter by language here because we want to find ALL references
+          // The migration process will create language variants if needed
           try {
-            console.log(`🔍 Searching for items using: ${item.codename} in language: ${selectedLanguage}`);
+            console.log(`🔍 Searching for items using: ${item.codename} in ANY language (will check ${selectedLanguage})`);
             
-            // Use fetch instead of SDK to support system.language[in] filter
-            const usedInUrl = `https://deliver.kontent.ai/${import.meta.env.VITE_KONTENT_PROJECT_ID}/items/${item.codename}/used-in?system.language[in]=${selectedLanguage}`;
+            // Don't filter by language - we want to find all items that reference this item
+            const usedInUrl = `https://deliver.kontent.ai/${import.meta.env.VITE_KONTENT_PROJECT_ID}/items/${item.codename}/used-in`;
             const usedInResponse = await fetch(usedInUrl, {
               headers: {
                 'Authorization': `Bearer ${import.meta.env.VITE_KONTENT_PREVIEW_API_KEY}`,
@@ -124,14 +129,14 @@ export function ItemRelationshipsViewer({
             const usedInData = await usedInResponse.json();
             const usedInItems = usedInData.items || [];
 
-            console.log(`✅ Found ${usedInItems.length} items using ${item.codename} in ${selectedLanguage}`);
+            console.log(`✅ Found ${usedInItems.length} items using ${item.codename} in any language`);
 
             for (const usedInItem of usedInItems) {
               // Fetch the item details to get element information
-              // IMPORTANT: Include language parameter to get the correct variant
-              // This will only return the item if it exists in the selected language
+              // Try to get it in the migration language first, then fall back to any language
               try {
-                const detailResponse = await fetch(
+                // First, try to get the item in the selected language
+                let detailResponse = await fetch(
                   `https://deliver.kontent.ai/${import.meta.env.VITE_KONTENT_PROJECT_ID}/items/${usedInItem.system.codename}?depth=0&language=${selectedLanguage}`,
                   {
                     headers: {
@@ -140,13 +145,47 @@ export function ItemRelationshipsViewer({
                   }
                 );
 
+                // If not found in selected language, try default language
+                if (!detailResponse.ok && detailResponse.status === 404) {
+                  console.log(`⚠️ Item ${usedInItem.system.codename} not in ${selectedLanguage}, trying default language...`);
+                  detailResponse = await fetch(
+                    `https://deliver.kontent.ai/${import.meta.env.VITE_KONTENT_PROJECT_ID}/items/${usedInItem.system.codename}?depth=0`,
+                    {
+                      headers: {
+                        'Authorization': `Bearer ${import.meta.env.VITE_KONTENT_PREVIEW_API_KEY}`,
+                      },
+                    }
+                  );
+                }
+
                 if (detailResponse.ok) {
                   const detailData = await detailResponse.json();
+                  const itemLanguage = detailData.item.system.language;
                   
-                  // Verify the item is actually in the requested language
-                  if (detailData.item.system.language !== selectedLanguage) {
-                    console.log(`⏭️ Skipping ${usedInItem.system.codename} - not in language ${selectedLanguage}`);
-                    continue;
+                  // Log if item exists in different language
+                  if (itemLanguage !== selectedLanguage) {
+                    console.log(`📝 Item ${usedInItem.system.codename} exists in ${itemLanguage}, will create variant in ${selectedLanguage} during migration`);
+                  }
+                  
+                  // Get the language variant ID from Management API for correct URL construction
+                  let languageVariantId: string | undefined;
+                  try {
+                    const variantResponse = await fetch(
+                      `https://manage.kontent.ai/v2/projects/${import.meta.env.VITE_KONTENT_PROJECT_ID}/items/codename/${usedInItem.system.codename}/variants/codename/${itemLanguage}`,
+                      {
+                        headers: {
+                          'Authorization': `Bearer ${import.meta.env.VITE_KONTENT_MANAGEMENT_API_KEY}`,
+                          'Content-Type': 'application/json',
+                        },
+                      }
+                    );
+                    
+                    if (variantResponse.ok) {
+                      const variantData = await variantResponse.json();
+                      languageVariantId = variantData.item?.id;
+                    }
+                  } catch (variantError) {
+                    console.log(`Could not fetch variant ID for ${usedInItem.system.codename}:`, variantError);
                   }
                   
                   // Find which field contains the reference
@@ -158,14 +197,18 @@ export function ItemRelationshipsViewer({
                           fromItemName: usedInItem.system.name,
                           fromItemCodename: usedInItem.system.codename,
                           fromItemType: usedInItem.system.type,
+                          fromItemCollection: usedInItem.system.collection || 'default', // Capture collection ID
+                          fromItemLanguageVariantId: languageVariantId, // Capture variant ID for URL
                           fieldName: elementCodename, // Use the element codename, not the display name
                           fromItemUrl: getKontentItemUrl(usedInItem.system.id, selectedLanguage),
+                          language: itemLanguage, // Store the language where this item exists
+                          needsLanguageVariant: itemLanguage !== selectedLanguage, // Flag if variant needs to be created
                         });
                       }
                     }
                   });
                 } else if (detailResponse.status === 404) {
-                  console.log(`⏭️ Item ${usedInItem.system.codename} doesn't exist in language ${selectedLanguage}`);
+                  console.log(`⚠️ Item ${usedInItem.system.codename} doesn't exist in any accessible language`);
                 }
               } catch (detailError) {
                 console.log(`Could not fetch details for ${usedInItem.system.codename}:`, detailError);
@@ -591,14 +634,35 @@ export function ItemRelationshipsViewer({
                                       </svg>
                                     </a>
                                   )}
+                                  {incoming.needsLanguageVariant && (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 border border-amber-300">
+                                      🌐 Will create {selectedLanguage} variant
+                                    </span>
+                                  )}
                                 </div>
                                 <div className="text-sm text-green-700">{incoming.fromItemCodename}</div>
                                 <div className="text-xs text-green-600 mt-1">
                                   via field: <span className="font-medium">{incoming.fieldName}</span>
+                                  {incoming.language && incoming.language !== selectedLanguage && (
+                                    <span className="ml-2 text-amber-600">
+                                      (currently in <strong>{incoming.language}</strong>)
+                                    </span>
+                                  )}
                                 </div>
                               </div>
-                              <div className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">
-                                Type: {incoming.fromItemType}
+                              <div className="flex flex-col gap-1 items-end">
+                                <div className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">
+                                  Type: {incoming.fromItemType}
+                                </div>
+                                {incoming.language && (
+                                  <div className={`text-xs px-2 py-1 rounded ${
+                                    incoming.language === selectedLanguage 
+                                      ? 'bg-blue-100 text-blue-800' 
+                                      : 'bg-amber-100 text-amber-800'
+                                  }`}>
+                                    Lang: {incoming.language}
+                                  </div>
+                                )}
                               </div>
                             </div>
                           </div>
