@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import * as XLSX from 'xlsx';
 
 interface RelationshipInfo {
   fieldName: string;
@@ -8,6 +9,7 @@ interface RelationshipInfo {
     name: string;
     codename: string;
     type: string;
+    url?: string;
   }[];
 }
 
@@ -17,6 +19,7 @@ interface IncomingRelationship {
   fromItemCodename: string;
   fromItemType: string;
   fieldName: string;
+  fromItemUrl?: string;
 }
 
 interface ItemRelationship {
@@ -24,6 +27,7 @@ interface ItemRelationship {
   itemName: string;
   itemCodename: string;
   itemType: string;
+  itemUrl?: string;
   outgoingRelationships: RelationshipInfo[];
   incomingRelationships: IncomingRelationship[];
 }
@@ -81,11 +85,13 @@ export function ItemRelationshipsViewer({
             if (element.type === 'modular_content' && element.value && element.value.length > 0) {
               const relatedItems = element.value.map((codename: string) => {
                 const relatedItem = modularContent[codename];
+                const itemId = relatedItem?.system?.id || 'unknown';
                 return {
-                  id: relatedItem?.system?.id || 'unknown',
+                  id: itemId,
                   name: relatedItem?.system?.name || codename,
                   codename: codename,
                   type: relatedItem?.system?.type || 'unknown',
+                  url: itemId !== 'unknown' ? getKontentItemUrl(itemId, selectedLanguage) : undefined,
                 };
               });
 
@@ -153,6 +159,7 @@ export function ItemRelationshipsViewer({
                           fromItemCodename: usedInItem.system.codename,
                           fromItemType: usedInItem.system.type,
                           fieldName: elementCodename, // Use the element codename, not the display name
+                          fromItemUrl: getKontentItemUrl(usedInItem.system.id, selectedLanguage),
                         });
                       }
                     }
@@ -176,6 +183,7 @@ export function ItemRelationshipsViewer({
               itemName: item.name,
               itemCodename: item.codename,
               itemType: item.type || 'unknown',
+              itemUrl: getKontentItemUrl(item.id, selectedLanguage),
               outgoingRelationships: outgoingRels,
               incomingRelationships: incomingRels,
             });
@@ -207,6 +215,171 @@ export function ItemRelationshipsViewer({
     0
   );
 
+  // Helper function to get language flag
+  const getLanguageFlag = (languageCode: string): string => {
+    const languageFlags: Record<string, string> = {
+      'en': '🇬🇧',
+      'de': '🇩🇪',
+      'es': '🇪🇸',
+      'zh': '🇨🇳',
+      'default': '🌐'
+    };
+    return languageFlags[languageCode] || languageFlags['default'];
+  };
+
+  // Helper function to generate Kontent.ai app URL for an item
+  const getKontentItemUrl = (itemId: string, languageCodename: string): string => {
+    const projectId = import.meta.env.VITE_KONTENT_PROJECT_ID;
+    return `https://app.kontent.ai/goto/edit-item/project/${projectId}/variant-codename/${languageCodename}/item/${itemId}`;
+  };
+
+  // Function to export relationships to Excel
+  const exportToExcel = () => {
+    // Create data for Excel
+    const excelData: any[] = [];
+
+    // Add header information
+    excelData.push({
+      'Item Name': 'MIGRATION RELATIONSHIPS REPORT',
+      'Item Codename': '',
+      'Item Type': '',
+      'Relationship Type': '',
+      'Related Item Name': '',
+      'Related Item Codename': '',
+      'Related Item Type': '',
+      'Field Name': '',
+    });
+
+    excelData.push({
+      'Item Name': `Language: ${selectedLanguage} ${getLanguageFlag(selectedLanguage)}`,
+      'Item Codename': '',
+      'Item Type': '',
+      'Relationship Type': '',
+      'Related Item Name': '',
+      'Related Item Codename': '',
+      'Related Item Type': '',
+      'Field Name': '',
+    });
+
+    excelData.push({
+      'Item Name': `Total Items: ${selectedItems.length}`,
+      'Item Codename': `Items with Relationships: ${relationships.length}`,
+      'Item Type': `Total Relationships: ${totalRelationships}`,
+      'Relationship Type': '',
+      'Related Item Name': '',
+      'Related Item Codename': '',
+      'Related Item Type': '',
+      'Field Name': '',
+    });
+
+    excelData.push({}); // Empty row
+
+    // Add column headers
+    excelData.push({
+      'Item Name': 'Item Name',
+      'Item Codename': 'Item Codename',
+      'Item Type': 'Item Type',
+      'Item URL': 'Item URL',
+      'Relationship Type': 'Relationship Type',
+      'Related Item Name': 'Related Item Name',
+      'Related Item Codename': 'Related Item Codename',
+      'Related Item Type': 'Related Item Type',
+      'Related Item URL': 'Related Item URL',
+      'Field Name': 'Field Name',
+    });
+
+    // Add relationships data
+    for (const itemRel of relationships) {
+      // Add outgoing relationships
+      for (const outgoing of itemRel.outgoingRelationships) {
+        for (const relItem of outgoing.relatedItems) {
+          excelData.push({
+            'Item Name': itemRel.itemName,
+            'Item Codename': itemRel.itemCodename,
+            'Item Type': itemRel.itemType,
+            'Item URL': itemRel.itemUrl || '',
+            'Relationship Type': '→ Outgoing',
+            'Related Item Name': relItem.name,
+            'Related Item Codename': relItem.codename,
+            'Related Item Type': relItem.type,
+            'Related Item URL': relItem.url || '',
+            'Field Name': outgoing.fieldName,
+          });
+        }
+      }
+
+      // Add incoming relationships
+      for (const incoming of itemRel.incomingRelationships) {
+        excelData.push({
+          'Item Name': itemRel.itemName,
+          'Item Codename': itemRel.itemCodename,
+          'Item Type': itemRel.itemType,
+          'Item URL': itemRel.itemUrl || '',
+          'Relationship Type': '← Incoming',
+          'Related Item Name': incoming.fromItemName,
+          'Related Item Codename': incoming.fromItemCodename,
+          'Related Item Type': incoming.fromItemType,
+          'Related Item URL': incoming.fromItemUrl || '',
+          'Field Name': incoming.fieldName,
+        });
+      }
+    }
+
+    // Add items without relationships
+    excelData.push({}); // Empty row
+    excelData.push({
+      'Item Name': 'ITEMS WITHOUT RELATIONSHIPS',
+      'Item Codename': '',
+      'Item Type': '',
+      'Relationship Type': '',
+      'Related Item Name': '',
+      'Related Item Codename': '',
+      'Related Item Type': '',
+      'Field Name': '',
+    });
+
+    for (const item of selectedItems) {
+      if (!relationships.find(rel => rel.itemId === item.id)) {
+        excelData.push({
+          'Item Name': item.name,
+          'Item Codename': item.codename,
+          'Item Type': item.type || 'unknown',
+          'Relationship Type': 'None',
+          'Related Item Name': '',
+          'Related Item Codename': '',
+          'Related Item Type': '',
+          'Field Name': '',
+        });
+      }
+    }
+
+    // Create workbook and worksheet
+    const worksheet = XLSX.utils.json_to_sheet(excelData, { skipHeader: true });
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Relationships');
+
+    // Set column widths
+    worksheet['!cols'] = [
+      { wch: 30 }, // Item Name
+      { wch: 30 }, // Item Codename
+      { wch: 20 }, // Item Type
+      { wch: 80 }, // Item URL
+      { wch: 15 }, // Relationship Type
+      { wch: 30 }, // Related Item Name
+      { wch: 30 }, // Related Item Codename
+      { wch: 20 }, // Related Item Type
+      { wch: 80 }, // Related Item URL
+      { wch: 25 }, // Field Name
+    ];
+
+    // Generate filename with timestamp
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+    const filename = `migration-relationships-${selectedLanguage}-${timestamp}.xlsx`;
+
+    // Download file
+    XLSX.writeFile(workbook, filename);
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -222,13 +395,41 @@ export function ItemRelationshipsViewer({
     <div className="space-y-6">
       {/* Header */}
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-        <h3 className="text-lg font-semibold text-blue-900 mb-2">
-          📊 Item Relationships Analysis
-        </h3>
-        <p className="text-sm text-blue-700 mb-2">
-          Review the relationships of selected items before migration. 
-          This shows both outgoing and incoming relationships for your content.
-        </p>
+        <div className="flex items-start justify-between mb-2">
+          <div className="flex-1">
+            <h3 className="text-lg font-semibold text-blue-900 mb-2">
+              📊 Item Relationships Analysis
+            </h3>
+            <p className="text-sm text-blue-700 mb-2">
+              Review the relationships of selected items before migration. 
+              This shows both outgoing and incoming relationships for your content.
+            </p>
+          </div>
+          <button
+            onClick={exportToExcel}
+            className="ml-4 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2 whitespace-nowrap"
+            title="Export relationships to Excel"
+          >
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            <span>Export to Excel</span>
+          </button>
+        </div>
+
+        {/* Language Badge */}
+        <div className="bg-blue-100 border-l-4 border-blue-500 p-3 mb-2 flex items-center">
+          <span className="text-2xl mr-3">{getLanguageFlag(selectedLanguage)}</span>
+          <div>
+            <p className="text-sm font-semibold text-blue-900">
+              Migration Language: <span className="text-blue-700">{selectedLanguage.toUpperCase()}</span>
+            </p>
+            <p className="text-xs text-blue-700">
+              All relationships and references will be analyzed and updated in this language variant.
+            </p>
+          </div>
+        </div>
+
         <div className="bg-blue-100 border-l-4 border-blue-400 p-3 mt-2">
           <p className="text-xs text-blue-800">
             <strong>🔍 Deep Search:</strong> Scanning up to 15 content types (first 100 items each) to find incoming relationships. 
@@ -273,12 +474,28 @@ export function ItemRelationshipsViewer({
                 onClick={() => toggleExpanded(itemRel.itemId)}
               >
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
+                  <div className="flex items-center space-x-3 flex-1">
                     <span className="text-xl">
                       {expandedItems.has(itemRel.itemId) ? '▼' : '▶'}
                     </span>
-                    <div>
-                      <div className="font-medium text-gray-900">{itemRel.itemName}</div>
+                    <div className="flex-1">
+                      <div className="flex items-center space-x-2">
+                        <div className="font-medium text-gray-900">{itemRel.itemName}</div>
+                        {itemRel.itemUrl && (
+                          <a
+                            href={itemRel.itemUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-gray-600 hover:text-gray-800 transition-colors"
+                            title="Open in Kontent.ai"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                            </svg>
+                          </a>
+                        )}
+                      </div>
                       <div className="text-sm text-gray-500">{itemRel.itemCodename}</div>
                     </div>
                   </div>
@@ -312,8 +529,23 @@ export function ItemRelationshipsViewer({
                                 className="bg-blue-50 border border-blue-200 rounded p-3"
                               >
                                 <div className="flex items-start justify-between">
-                                  <div>
-                                    <div className="font-medium text-blue-900">{relItem.name}</div>
+                                  <div className="flex-1">
+                                    <div className="flex items-center space-x-2">
+                                      <div className="font-medium text-blue-900">{relItem.name}</div>
+                                      {relItem.url && (
+                                        <a
+                                          href={relItem.url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-blue-600 hover:text-blue-800 transition-colors"
+                                          title="Open in Kontent.ai"
+                                        >
+                                          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                          </svg>
+                                        </a>
+                                      )}
+                                    </div>
                                     <div className="text-sm text-blue-700">{relItem.codename}</div>
                                   </div>
                                   <div className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
@@ -343,8 +575,23 @@ export function ItemRelationshipsViewer({
                             className="bg-green-50 border border-green-200 rounded p-3"
                           >
                             <div className="flex items-start justify-between">
-                              <div>
-                                <div className="font-medium text-green-900">{incoming.fromItemName}</div>
+                              <div className="flex-1">
+                                <div className="flex items-center space-x-2">
+                                  <div className="font-medium text-green-900">{incoming.fromItemName}</div>
+                                  {incoming.fromItemUrl && (
+                                    <a
+                                      href={incoming.fromItemUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-green-600 hover:text-green-800 transition-colors"
+                                      title="Open in Kontent.ai"
+                                    >
+                                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                      </svg>
+                                    </a>
+                                  )}
+                                </div>
                                 <div className="text-sm text-green-700">{incoming.fromItemCodename}</div>
                                 <div className="text-xs text-green-600 mt-1">
                                   via field: <span className="font-medium">{incoming.fieldName}</span>
